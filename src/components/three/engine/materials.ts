@@ -1,0 +1,382 @@
+import * as THREE from "three";
+
+export const shared = {
+  uTime: { value: 0 },
+};
+
+const NOISE_GLSL = /* glsl */ `
+float pcHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float pcNoise(vec2 x) {
+  vec2 i = floor(x);
+  vec2 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(pcHash(i), pcHash(i + vec2(1, 0)), f.x), mix(pcHash(i + vec2(0, 1)), pcHash(i + vec2(1, 1)), f.x), f.y);
+}
+`;
+
+export interface InkStoneOptions {
+  tattoo?: THREE.Texture | null;
+  inkColor?: THREE.ColorRepresentation;
+  inkMetal?: number;
+  inkRough?: number;
+  dark?: number; // 0 marmo avorio, 1 marmo nero
+  pour?: number; // inchiostro colato dalla sommità (0 = nessuno)
+  topY?: number; // sommità in spazio oggetto per la colata
+  yRange?: [number, number]; // proiezione cilindrica: fascia in altezza
+  envIntensity?: number;
+  /** proiezione planare: rettangolo in spazio oggetto (x0, y0, w, h) lungo la direzione `projYaw` */
+  rect?: { x0: number; y0: number; w: number; h: number };
+  projYaw?: number;
+  origin?: [number, number]; // origine della propagazione (uv)
+  dressY?: number; // veste d'inchiostro liquido sotto questa quota (spazio oggetto)
+  glow?: THREE.ColorRepresentation; // colore dell'"ago" che traccia l'inchiostro
+}
+
+/**
+ * Marmo procedurale (scansioni senza texture) con tatuaggio, su MeshStandardMaterial.
+ * - uTattoo: maschera R8 (bianco = inchiostro), proiezione cilindrica (torsi) o planare (busti, statue).
+ * - uReveal: l'inchiostro si propaga dall'origine con bordo organico; il fronte brilla come un ago caldo.
+ * - uPour / uDressY: inchiostro liquido lucido che cola dall'alto o veste la statua dal basso.
+ */
+export function makeInkStoneMaterial(o: InkStoneOptions) {
+  const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, envMapIntensity: o.envIntensity ?? 0.6 });
+  const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+  blank.needsUpdate = true;
+  const r = o.rect;
+  const uniforms = {
+    uTattoo: { value: o.tattoo ?? blank },
+    uReveal: { value: 0 },
+    uInkColor: { value: new THREE.Color(o.inkColor ?? 0x020305) },
+    uInkMetal: { value: o.inkMetal ?? 0 },
+    uInkRough: { value: o.inkRough ?? 0.36 },
+    uDark: { value: o.dark ?? 0 },
+    uPour: { value: o.pour ?? 0 },
+    uTopY: { value: o.topY ?? 1 },
+    uYRange: { value: new THREE.Vector2(...(o.yRange ?? [0, 1])) },
+    uHasTattoo: { value: o.tattoo ? 1 : 0 },
+    uProj: { value: r ? 1 : 0 },
+    uRect: { value: new THREE.Vector4(r?.x0 ?? 0, r?.y0 ?? 0, r?.w ?? 1, r?.h ?? 1) },
+    uProjYaw: { value: o.projYaw ?? 0 },
+    uOrigin: { value: new THREE.Vector2(...(o.origin ?? [0.5, 0.2])) },
+    uAspect: { value: new THREE.Vector2(r ? r.w / Math.max(r.w, r.h) : 1.6, r ? r.h / Math.max(r.w, r.h) : 1) },
+    uDressY: { value: o.dressY ?? -1 },
+    uGlowCol: { value: new THREE.Color(o.glow ?? 0xff8a3d) },
+    uTime: shared.uTime,
+  };
+  m.userData.uniforms = uniforms;
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vObj;\nvarying vec3 vObjN;")
+      .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nvObjN = objectNormal;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvObj = position;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+varying vec3 vObj;
+varying vec3 vObjN;
+uniform sampler2D uTattoo;
+uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uProj, uProjYaw, uDressY;
+uniform vec3 uInkColor, uGlowCol;
+uniform vec2 uYRange, uOrigin, uAspect;
+uniform vec4 uRect;
+float pcInk;
+float pcLiquid;
+float pcGlow;
+${NOISE_GLSL}
+`,
+      )
+      .replace(
+        "#include <map_fragment>",
+        /* glsl */ `#include <map_fragment>
+{
+  vec2 tuv;
+  float wproj = 1.0;
+  vec2 gx, gy;
+  float dist;
+  if (uProj < 0.5) {
+    tuv = vec2(atan(vObj.x, vObj.z) / 6.2831853 + 0.5, (vObj.y - uYRange.x) / (uYRange.y - uYRange.x));
+    gx = dFdx(tuv); gy = dFdy(tuv);
+    if (abs(gx.x) > 0.5) gx.x -= sign(gx.x);
+    if (abs(gy.x) > 0.5) gy.x -= sign(gy.x);
+    dist = length(vec2((tuv.x - 0.5) * 1.6, tuv.y - uOrigin.y));
+  } else {
+    float cs = cos(uProjYaw), sn = sin(uProjYaw);
+    tuv = vec2((vObj.x * cs - vObj.z * sn - uRect.x) / uRect.z, (vObj.y - uRect.y) / uRect.w);
+    float facing = dot(normalize(vObjN), vec3(sn, 0.0, cs));
+    vec2 inside = step(vec2(0.0), tuv) * step(tuv, vec2(1.0));
+    wproj = smoothstep(0.02, 0.3, facing) * inside.x * inside.y;
+    gx = dFdx(tuv); gy = dFdy(tuv);
+    dist = length((tuv - uOrigin) * uAspect) * 1.25;
+  }
+  float ink = textureGrad(uTattoo, tuv, gx, gy).r;
+  float bleed = textureGrad(uTattoo, tuv, gx * 9.0, gy * 9.0).r;
+  float n = pcNoise(vObj.xy * 38.0 + vObj.z * 21.0) * 0.5 + pcNoise(vObj.zy * 95.0) * 0.25;
+  float rv = uReveal * 1.6 - (dist * 0.9 + n * 0.32);
+  float mask = smoothstep(0.0, 0.05, rv) * uHasTattoo * wproj;
+  pcInk = clamp(ink * 0.96 + bleed * 0.1, 0.0, 1.0) * mask;
+  // fronte che avanza: l'ago scalda la linea appena tracciata
+  pcGlow = ink * smoothstep(0.0, 0.02, rv) * (1.0 - smoothstep(0.02, 0.2, rv)) * uHasTattoo * wproj;
+  // marmo procedurale
+  vec3 q = vObj * 2.2;
+  float w1 = pcNoise(q.xy * 1.7 + q.z) + 0.5 * pcNoise(q.zy * 3.9 - q.x) + 0.25 * pcNoise(q.xz * 8.1);
+  float vein = pow(1.0 - abs(sin((q.x * 0.8 + q.y * 1.6 + q.z * 0.5) * 3.0 + w1 * 5.0)), 9.0);
+  float cloud = pcNoise(q.xy * 0.9 + 3.0) * 0.5 + pcNoise(q.zy * 2.3) * 0.5;
+  vec3 ivory = vec3(0.56, 0.53, 0.48) * (0.9 + 0.14 * cloud);
+  diffuseColor.rgb = mix(ivory, vec3(0.24, 0.23, 0.22), vein * 0.6);
+  float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+  vec3 darkStone = mix(vec3(0.008, 0.008, 0.009), vec3(0.075, 0.07, 0.066), pow(lum, 2.6) * 1.6) + vec3(0.05, 0.045, 0.04) * vein;
+  diffuseColor.rgb = mix(diffuseColor.rgb, darkStone, uDark);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uInkColor, pcInk);
+  // colata dalla sommità
+  float ang = atan(vObj.x, vObj.z) / 6.2831853 + 0.5;
+  float depth = uTopY - vObj.y;
+  float drip = pow(pcNoise(vec2(ang * 46.0, 1.7)), 5.0) * 0.30 + pow(pcNoise(vec2(ang * 17.0, 4.1)), 3.0) * 0.12;
+  float grow = 0.5 + 0.5 * sin(uTime * 0.25 + ang * 9.0);
+  float cover = uPour * (0.09 + drip * (0.65 + 0.35 * grow));
+  pcLiquid = (1.0 - smoothstep(-0.002, 0.004, depth - cover)) * step(0.001, uPour);
+  // veste d'inchiostro che risale con viticci
+  if (uDressY > -0.5) {
+    float tend = pow(pcNoise(vec2(vObj.x * 26.0 + vObj.z * 13.0, 3.1)), 4.0) * 0.3
+               + pow(pcNoise(vec2(vObj.x * 9.0 - vObj.z * 7.0, 7.7)), 3.0) * 0.12;
+    float edge = uDressY + tend * (0.8 + 0.2 * sin(uTime * 0.5 + vObj.x * 11.0)) + 0.012 * sin(vObj.x * 23.0 + vObj.z * 17.0 + uTime * 0.7);
+    pcLiquid = max(pcLiquid, 1.0 - smoothstep(edge - 0.003, edge + 0.003, vObj.y));
+  }
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.003, 0.0032, 0.004), pcLiquid);
+  pcGlow *= 1.0 - pcLiquid;
+}`,
+      )
+      .replace(
+        "#include <roughnessmap_fragment>",
+        /* glsl */ `#include <roughnessmap_fragment>
+roughnessFactor = mix(mix(0.6, 0.34, uDark), uInkRough, pcInk);
+roughnessFactor = mix(roughnessFactor, 0.06, pcLiquid);`,
+      )
+      .replace(
+        "#include <metalnessmap_fragment>",
+        /* glsl */ `#include <metalnessmap_fragment>
+metalnessFactor = mix(metalnessFactor, uInkMetal, pcInk);`,
+      )
+      .replace(
+        "#include <emissivemap_fragment>",
+        /* glsl */ `#include <emissivemap_fragment>
+totalEmissiveRadiance += uGlowCol * pcGlow * 11.0;`,
+      );
+  };
+  m.customProgramCacheKey = () => "inkstone2";
+  return m;
+}
+
+/** Maschera di un canvas (canale rosso) come texture R8: un quarto della memoria di una RGBA. */
+export function maskTexture(c: HTMLCanvasElement, renderer: THREE.WebGLRenderer, repeat = false) {
+  const w = c.width;
+  const h = c.height;
+  const src = c.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, w, h).data;
+  const data = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const row = (h - 1 - y) * w;
+    const srow = y * w * 4;
+    for (let x = 0; x < w; x++) data[row + x] = src[srow + x * 4];
+  }
+  const t = new THREE.DataTexture(data, w, h, THREE.RedFormat, THREE.UnsignedByteType);
+  t.internalFormat = "R8";
+  t.unpackAlignment = 1;
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  t.needsUpdate = true;
+  return t;
+}
+
+/**
+ * Anello d'inchiostro liquido (TorusGeometry): spostamento lungo la normale con rumore
+ * che scorre attorno al cerchio, normali ricalcolate per differenze finite sul parametrico.
+ */
+export function makeInkRingMaterial(R: number, r: number, amp = 0.12) {
+  const m = new THREE.MeshPhysicalMaterial({
+    color: 0x020203,
+    roughness: 0.09,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.6,
+    iridescence: 0.25,
+    iridescenceIOR: 1.3,
+  });
+  const uniforms = { uR: { value: R }, ur: { value: r }, uAmp: { value: amp }, uTime: shared.uTime, uSeed: { value: Math.random() * 10 } };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+uniform float uR, ur, uAmp, uTime, uSeed;
+float rh(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float rn(vec3 x){ vec3 i=floor(x); vec3 f=fract(x); f=f*f*(3.0-2.0*f);
+  return mix(mix(mix(rh(i),rh(i+vec3(1,0,0)),f.x),mix(rh(i+vec3(0,1,0)),rh(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(rh(i+vec3(0,0,1)),rh(i+vec3(1,0,1)),f.x),mix(rh(i+vec3(0,1,1)),rh(i+vec3(1,1,1)),f.x),f.y),f.z); }
+vec3 ringP(float a, float b) {
+  float thick = ur * (1.0 + 0.35 * sin(a * 2.0 + uSeed) + 0.2 * sin(a * 5.0 - uTime * 0.3 + uSeed));
+  vec3 n0 = vec3(cos(b) * cos(a), cos(b) * sin(a), sin(b));
+  vec3 base = vec3(uR * cos(a), uR * sin(a), 0.0);
+  vec3 ra = vec3(cos(a + uTime * 0.05), sin(a + uTime * 0.05), 0.0);
+  float d = (rn(vec3(ra.xy * 2.2, b * 0.0) + n0 * 1.6 + vec3(0.0, 0.0, uTime * 0.18 + uSeed)) - 0.5) * uAmp * 2.0;
+  d += sin(a * 40.0 - uTime * 1.2 + b * 2.0) * uAmp * 0.04;
+  return base + n0 * (thick + d);
+}
+`,
+      )
+      .replace(
+        "#include <beginnormal_vertex>",
+        /* glsl */ `
+float pa = uv.x * 6.2831853;
+float pb = uv.y * 6.2831853;
+vec3 P0 = ringP(pa, pb);
+vec3 Pa = ringP(pa + 0.004, pb);
+vec3 Pb = ringP(pa, pb + 0.02);
+vec3 objectNormal = normalize(cross(Pa - P0, Pb - P0));
+#ifdef USE_TANGENT
+vec3 objectTangent = vec3(tangent.xyz);
+#endif`,
+      )
+      .replace("#include <begin_vertex>", "vec3 transformed = P0;");
+  };
+  m.customProgramCacheKey = () => "inkring";
+  return m;
+}
+
+/** Pavimento: specchio d'inchiostro con increspature, compatibile con Reflector. */
+export const InkFloorShader = {
+  name: "InkFloorShader",
+  uniforms: {
+    color: { value: null as THREE.Color | null },
+    tDiffuse: { value: null as THREE.Texture | null },
+    textureMatrix: { value: null as THREE.Matrix4 | null },
+    uTime: shared.uTime,
+  },
+  vertexShader: /* glsl */ `
+uniform mat4 textureMatrix;
+varying vec4 vUvR;
+varying vec3 vWorld;
+#include <common>
+#include <logdepthbuf_pars_vertex>
+void main() {
+  vUvR = textureMatrix * vec4(position, 1.0);
+  vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  #include <logdepthbuf_vertex>
+}`,
+  fragmentShader: /* glsl */ `
+uniform vec3 color;
+uniform sampler2D tDiffuse;
+uniform float uTime;
+varying vec4 vUvR;
+varying vec3 vWorld;
+#include <logdepthbuf_pars_fragment>
+${NOISE_GLSL}
+void main() {
+  #include <logdepthbuf_fragment>
+  vec2 p = vWorld.xz;
+  float n1 = pcNoise(p * 1.3 + vec2(uTime * 0.05, -uTime * 0.04));
+  float n2 = pcNoise(p * 3.7 - vec2(uTime * 0.09, uTime * 0.06));
+  vec2 dist = vec2(n1 - 0.5, n2 - 0.5) * 0.035;
+  // sottili cerchi concentrici che si allargano attorno ai plinti
+  vec4 uvr = vUvR;
+  uvr.xy += dist * uvr.w;
+  vec3 refl = texture2DProj(tDiffuse, uvr).rgb;
+  vec3 camDir = normalize(cameraPosition - vWorld);
+  float F = 0.06 + 0.94 * pow(1.0 - clamp(camDir.y, 0.0, 1.0), 4.0);
+  vec3 base = vec3(0.0035, 0.0036, 0.004) * (0.8 + 0.4 * n2);
+  float mask = 0.55 + 0.45 * smoothstep(0.35, 0.7, pcNoise(p * 0.35));
+  vec3 col = base + refl * mix(0.35, 0.95, F) * mask;
+  gl_FragColor = vec4(col, 1.0);
+}`,
+};
+
+/** Cono volumetrico additivo per i fasci delle luci spot. */
+export function makeBeamMaterial(color: THREE.ColorRepresentation, strength = 0.18) {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms: { uColor: { value: new THREE.Color(color) }, uStrength: { value: strength }, uTime: shared.uTime },
+    vertexShader: /* glsl */ `
+varying vec3 vN; varying vec3 vV; varying float vH; varying vec3 vW;
+void main(){
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vW = w.xyz;
+  vN = normalize(mat3(modelMatrix) * normal);
+  vV = normalize(cameraPosition - w.xyz);
+  vH = uv.y;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`,
+    fragmentShader: /* glsl */ `
+uniform vec3 uColor; uniform float uStrength; uniform float uTime;
+varying vec3 vN; varying vec3 vV; varying float vH; varying vec3 vW;
+${NOISE_GLSL}
+void main(){
+  float f = abs(dot(normalize(vN), normalize(vV)));
+  float edge = pow(clamp(f, 0.0, 1.0), 2.2);
+  float along = pow(clamp(vH, 0.0, 1.0), 1.4); // su D3D pow di un negativo dà NaN
+  float dust = 0.75 + 0.25 * pcNoise(vW.xz * 3.0 + vec2(0.0, vW.y * 2.0 - uTime * 0.2));
+  gl_FragColor = vec4(uColor * edge * along * dust * uStrength, 1.0);
+}`,
+  });
+}
+
+/** Pannello flash: linee avorio che si disegnano (reveal) e respirano. */
+export function makeFlashMaterial(tex: THREE.Texture) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTex: { value: tex }, uReveal: { value: 0 }, uTime: shared.uTime },
+    vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: /* glsl */ `
+uniform sampler2D uTex; uniform float uReveal; uniform float uTime;
+varying vec2 vUv;
+${NOISE_GLSL}
+void main(){
+  float l = texture2D(uTex, vUv).r;
+  float glow = texture2D(uTex, vUv, 3.5).r;
+  float n = pcNoise(vUv * vec2(8.0, 12.0));
+  float rv = smoothstep(0.0, 0.08, uReveal * 1.3 - (1.0 - vUv.y) * 0.8 - n * 0.3);
+  vec3 ivory = vec3(0.93, 0.88, 0.80);
+  vec3 col = vec3(0.006) + ivory * (l * 1.25 + glow * 0.12) * rv;
+  col *= 0.92 + 0.08 * sin(uTime * 0.8 + vUv.y * 3.0);
+  gl_FragColor = vec4(col, 1.0);
+}`,
+  });
+}
+
+/** Membrana d'inchiostro dentro l'anello dell'oculo: vortice scuro, filamenti, bordo d'eclissi (come il portale). */
+export function makeMembraneMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    fog: false,
+    uniforms: { uTime: shared.uTime },
+    vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+uniform float uTime; varying vec2 vUv;
+${NOISE_GLSL}
+float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++){ s += a * pcNoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p; a *= 0.5; } return s; }
+void main(){
+  vec2 q = (vUv - 0.5) * 2.0;
+  float r = length(q);
+  float tw = uTime * 0.3 + 2.2 / (r + 0.3);
+  vec2 w = mat2(cos(tw), -sin(tw), sin(tw), cos(tw)) * q;
+  float fil = fbm(vec2(atan(w.y, w.x) * 3.0, r * 9.0 - uTime * 0.6));
+  vec3 col = vec3(0.0025, 0.0026, 0.0034) * smoothstep(0.0, 0.9, r);
+  col += vec3(0.85, 0.8, 0.72) * pow(smoothstep(0.55, 0.75, fil), 3.0) * 0.03 * smoothstep(0.05, 0.6, r);
+  col += vec3(1.0, 0.86, 0.68) * exp(-max(1.0 - r, 0.0) * 26.0) * 0.12;
+  gl_FragColor = vec4(col, 1.0);
+}`,
+  });
+}

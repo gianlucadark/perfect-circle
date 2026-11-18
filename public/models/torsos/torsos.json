@@ -1,0 +1,50 @@
+[
+  {
+    "id": "KAS402",
+    "file": "torso_KAS402.glb",
+    "height": 1.22,
+    "circumference": 1.813,
+    "frontYaw": 0,
+    "tris": 48000
+  },
+  {
+    "id": "KAS1242",
+    "file": "torso_KAS1242.glb",
+    "height": 1.46,
+    "circumference": 1.6988,
+    "frontYaw": 0,
+    "tris": 48000
+  },
+  {
+    "id": "KAS425",
+    "file": "torso_KAS425.glb",
+    "height": 1.55,
+    "circumference": 2.1616,
+    "frontYaw": 0,
+    "tris": 47999
+  },
+  {
+    "id": "KAS100",
+    "file": "torso_KAS100.glb",
+    "height": 0.95,
+    "circumference": 1.2379,
+    "frontYaw": 0,
+    "tris": 48000
+  },
+  {
+    "id": "KAS2113",
+    "file": "torso_KAS2113.glb",
+    "height": 1.32,
+    "circumference": 1.4907,
+    "frontYaw": 0,
+    "tris": 48000
+  },
+  {
+    "id": "KAS1048",
+    "file": "torso_KAS1048.glb",
+    "height": 1.3,
+    "circumference": 1.5458,
+    "frontYaw": 0,
+    "tris": 48000
+  }
+]
