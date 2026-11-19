@@ -97,7 +97,7 @@ export interface TorsoPen {
   wrap: (draw: () => void) => void;
 }
 
-function makeTorsoPen(frame: TorsoFrame, px: number): TorsoPen {
+export function makeTorsoPen(frame: TorsoFrame, px: number): TorsoPen {
   const { C, H } = frame;
   const W = px;
   const k = W / C;
@@ -126,7 +126,7 @@ function makeTorsoPen(frame: TorsoFrame, px: number): TorsoPen {
 }
 
 /** griglia di lettura: linee ogni 5 cm, etichette ogni 10 cm (x = arco dal centro del petto, y = quota) */
-function debugGrid(p: TorsoPen) {
+export function debugGrid(p: TorsoPen) {
   const { c, C, H } = p;
   for (let x = 0; x <= C / 2; x += 0.05) {
     for (const s of x ? [-1, 1] : [1]) {
@@ -160,10 +160,10 @@ function debugGrid(p: TorsoPen) {
 }
 
 // ------------------------------------------------------------------ curve che seguono il corpo
-type Pt = [number, number];
+export type Pt = [number, number];
 const TAU = Math.PI * 2;
 
-interface CurvePt {
+export interface CurvePt {
   x: number;
   y: number;
   tx: number;
@@ -172,13 +172,13 @@ interface CurvePt {
   nx: number;
   ny: number;
 }
-interface Curve {
+export interface Curve {
   L: number;
   at: (s: number) => CurvePt;
 }
 
 /** spline di Catmull-Rom sui punti di controllo, parametrizzata per lunghezza d'arco */
-function spline(ctrl: Pt[]): Curve {
+export function spline(ctrl: Pt[]): Curve {
   const P = (i: number) => ctrl[Math.max(0, Math.min(ctrl.length - 1, i))];
   const pts: Pt[] = [];
   for (let i = 0; i < ctrl.length - 1; i++) {
@@ -219,7 +219,7 @@ type Fn = (f: number) => number;
 const val = (v: number | Fn, f: number) => (typeof v === "number" ? v : v(f));
 
 /** tratto pieno lungo la curva, largo w(f) (f = 0..1), spostato di `off` lungo la normale */
-function ribbon(c: Ctx, cv: Curve, w: number | Fn, off: number | Fn = 0) {
+export function ribbon(c: Ctx, cv: Curve, w: number | Fn, off: number | Fn = 0) {
   const n = Math.max(16, Math.ceil(cv.L / 0.0015));
   const left: Pt[] = [];
   const right: Pt[] = [];
@@ -234,7 +234,7 @@ function ribbon(c: Ctx, cv: Curve, w: number | Fn, off: number | Fn = 0) {
   poly(c, [...left, ...right.reverse()]);
 }
 
-function strokeCurve(c: Ctx, cv: Curve, lw: number, off: number | Fn = 0) {
+export function strokeCurve(c: Ctx, cv: Curve, lw: number, off: number | Fn = 0) {
   const n = Math.max(16, Math.ceil(cv.L / 0.0015));
   c.lineWidth = lw;
   c.beginPath();
@@ -249,16 +249,16 @@ function strokeCurve(c: Ctx, cv: Curve, lw: number, off: number | Fn = 0) {
 }
 
 /** un motivo ogni `step` metri lungo la curva */
-function along(cv: Curve, step: number, fn: (p: CurvePt, f: number, i: number) => void, f0 = 0, f1 = 1) {
+export function along(cv: Curve, step: number, fn: (p: CurvePt, f: number, i: number) => void, f0 = 0, f1 = 1) {
   let i = 0;
   for (let s = f0 * cv.L + step / 2; s <= f1 * cv.L; s += step, i++) fn(cv.at(s), s / cv.L, i);
 }
 
-const offset = (p: CurvePt, d: number): Pt => [p.x + p.nx * d, p.y + p.ny * d];
-const dirOf = (p: CurvePt, side: number) => Math.atan2(p.ny * side, p.nx * side);
+export const offset = (p: CurvePt, d: number): Pt => [p.x + p.nx * d, p.y + p.ny * d];
+export const dirOf = (p: CurvePt, side: number) => Math.atan2(p.ny * side, p.nx * side);
 
 /** ombreggiatura a puntini che sfuma allontanandosi dalla curva (da un lato o da entrambi) */
-function stippleCurve(c: Ctx, rng: Rng, cv: Curve, n: number, spread: number, size: number, side = 0, off = 0) {
+export function stippleCurve(c: Ctx, rng: Rng, cv: Curve, n: number, spread: number, size: number, side = 0, off = 0) {
   for (let i = 0; i < n; i++) {
     const p = cv.at(rng() * cv.L);
     const t = Math.pow(rng(), 1.7);
@@ -268,11 +268,11 @@ function stippleCurve(c: Ctx, rng: Rng, cv: Curve, n: number, spread: number, si
   }
 }
 
-const grey = (a: number) => `rgba(255,255,255,${Math.max(0, Math.min(1, a)).toFixed(3)})`;
+export const grey = (a: number) => `rgba(255,255,255,${Math.max(0, Math.min(1, a)).toFixed(3)})`;
 
 let blurOK: boolean | null = null;
 /** il filtro blur del canvas 2D non c'è ovunque (Safari datati): lo si prova su un pixel */
-function canBlur() {
+export function canBlur() {
   if (blurOK === null) {
     const t = document.createElement("canvas");
     t.width = t.height = 9;
@@ -286,7 +286,7 @@ function canBlur() {
 }
 
 /** sfumatura black & grey lungo una curva: il centro raggiunge `alpha`, i bordi svaniscono */
-function softCurve(c: Ctx, cv: Curve, width: number, alpha: number, off: number | Fn = 0) {
+export function softCurve(c: Ctx, cv: Curve, width: number, alpha: number, off: number | Fn = 0) {
   c.save();
   if (canBlur()) {
     c.filter = `blur(${(width * 0.24 * c.getTransform().a).toFixed(1)}px)`;
@@ -302,7 +302,7 @@ function softCurve(c: Ctx, cv: Curve, width: number, alpha: number, off: number 
 }
 
 /** alone morbido: pieno fino a r0, sfuma a zero in r1 */
-function softDisk(c: Ctx, x: number, y: number, r0: number, r1: number, alpha: number) {
+export function softDisk(c: Ctx, x: number, y: number, r0: number, r1: number, alpha: number) {
   const g = c.createRadialGradient(x, y, r0, x, y, r1);
   g.addColorStop(0, grey(alpha));
   g.addColorStop(0.5, grey(alpha * 0.35));
@@ -317,7 +317,7 @@ function softDisk(c: Ctx, x: number, y: number, r0: number, r1: number, alpha: n
 
 // ------------------------------------------------------------------ motivi
 /** petalo appuntito di loto tra i raggi r0 e r1 */
-function lotusPetal(c: Ctx, x: number, y: number, a: number, r0: number, r1: number, hw: number, fill: boolean, lw: number) {
+export function lotusPetal(c: Ctx, x: number, y: number, a: number, r0: number, r1: number, hw: number, fill: boolean, lw: number) {
   const at = (ang: number, r: number): Pt => [x + Math.cos(ang) * r, y + Math.sin(ang) * r];
   const rm = r0 + (r1 - r0) * 0.42;
   c.beginPath();
@@ -334,7 +334,7 @@ function lotusPetal(c: Ctx, x: number, y: number, a: number, r0: number, r1: num
 }
 
 /** sole ornamentale blackwork: alone di puntini, corona di petali pieni, anello nero con perle in negativo, loto e fiore della vita */
-function sunMandala(c: Ctx, rng: Rng, x: number, y: number, R: number, lw: number, petals = 16) {
+export function sunMandala(c: Ctx, rng: Rng, x: number, y: number, R: number, lw: number, petals = 16) {
   softDisk(c, x, y, R * 1.05, R * 1.8, 0.72);
   // dentro il sole la pelle resta chiara: solo un velo leggero verso il centro
   erase(c);
@@ -370,7 +370,7 @@ function sunMandala(c: Ctx, rng: Rng, x: number, y: number, R: number, lw: numbe
 }
 
 /** fascia ornamentale che segue una linea del corpo: banda piena con perle in negativo, filo di perline, gocce pendenti */
-function ornamentBand(c: Ctx, cv: Curve, o: { w: number; lw: number; side: 1 | -1; drops?: number; taper?: number; teeth?: boolean }) {
+export function ornamentBand(c: Ctx, cv: Curve, o: { w: number; lw: number; side: 1 | -1; drops?: number; taper?: number; teeth?: boolean }) {
   const w = (f: number) => o.w * (1 - (o.taper ?? 0.5) * f);
   ribbon(c, cv, w);
   erase(c);
@@ -401,7 +401,7 @@ function ornamentBand(c: Ctx, cv: Curve, o: { w: number; lw: number; side: 1 | -
 }
 
 /** petalo di peonia: bordo frastagliato, ombra black & grey che sale dal cuore, pieghe sottili */
-function peonyPetal(c: Ctx, rng: Rng, x: number, y: number, a: number, len: number, wid: number, lw: number) {
+export function peonyPetal(c: Ctx, rng: Rng, x: number, y: number, a: number, len: number, wid: number, lw: number) {
   const ca = Math.cos(a);
   const sa = Math.sin(a);
   const P = (u: number, v: number): Pt => [x + ca * u - sa * v, y + sa * u + ca * v];
@@ -457,7 +457,7 @@ function peonyPetal(c: Ctx, rng: Rng, x: number, y: number, a: number, len: numb
 }
 
 /** peonia aperta vista dall'alto: quattro giri di petali, cuore di stami */
-function peony(c: Ctx, rng: Rng, x: number, y: number, R: number, rot: number, lw: number) {
+export function peony(c: Ctx, rng: Rng, x: number, y: number, R: number, rot: number, lw: number) {
   softDisk(c, x, y, R * 0.95, R * 1.6, 0.78);
   stippleRing(c, rng, x, y, R * 1.0, R * 1.65, Math.round(2.2e5 * R * R), lw * 0.5);
   const layers = [
@@ -483,7 +483,7 @@ function peony(c: Ctx, rng: Rng, x: number, y: number, R: number, rot: number, l
 }
 
 /** foglia a mandorla: una metà piena con nervature in negativo, l'altra a contorno */
-function leafSolid(c: Ctx, x: number, y: number, a: number, len: number, wid: number, lw: number, flip: 1 | -1) {
+export function leafSolid(c: Ctx, x: number, y: number, a: number, len: number, wid: number, lw: number, flip: 1 | -1) {
   const ca = Math.cos(a);
   const sa = Math.sin(a);
   const P = (u: number, v: number): Pt => [x + ca * u - sa * v, y + sa * u + ca * v];
@@ -511,7 +511,7 @@ function leafSolid(c: Ctx, x: number, y: number, a: number, len: number, wid: nu
 }
 
 /** bocciolo chiuso con sepali */
-function bud(c: Ctx, rng: Rng, x: number, y: number, a: number, len: number, lw: number) {
+export function bud(c: Ctx, rng: Rng, x: number, y: number, a: number, len: number, lw: number) {
   const ca = Math.cos(a);
   const sa = Math.sin(a);
   const P = (u: number, v: number): Pt => [x + ca * u - sa * v, y + sa * u + ca * v];
@@ -548,7 +548,7 @@ function bud(c: Ctx, rng: Rng, x: number, y: number, a: number, len: number, lw:
 }
 
 /** rosario lungo la spina dorsale: filo, cerchi che si stringono scendendo, goccia finale */
-function rosary(c: Ctx, x: number, y0: number, y1: number, r0: number, lw: number) {
+export function rosary(c: Ctx, x: number, y0: number, y1: number, r0: number, lw: number) {
   line(c, x, y0, x, y1, lw * 1.2);
   const n = Math.floor((y0 - y1) / (r0 * 2.7));
   for (let i = 0; i < n; i++) {

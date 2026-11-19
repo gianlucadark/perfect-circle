@@ -42,5 +42,5 @@ Script: `PerfectCircle/03_blender/scripts/pc_export_torsos.py` (48k triangoli, p
 ## Tatuaggi
 
 I tatuaggi sulle statue e le tavole flash sono disegni procedurali generati nel browser
-(`statueTattoos.ts`, `tattoo.ts`). Non sono opere dello studio o dell'artista. Prima di un uso pubblico
+(`statueTattoos.ts`, `torsoTattoos.ts`, `davidTattoo.ts`, `ritahTattoos.ts`, `inkArt.ts`, `tattoo.ts`). Non sono opere dello studio o dell'artista. Prima di un uso pubblico
 vanno sostituiti o affiancati da lavori reali autorizzati.

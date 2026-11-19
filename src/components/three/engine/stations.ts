@@ -117,8 +117,8 @@ export const STATIONS: Station[] = [
     via: [{ pos: [-1.55, 1.72, -35.2], look: [-0.5, 1.6, -40] }],
     index: "VI",
     title: "Il gigante",
-    body: "Un serpente gli gira attorno al collo, sale dietro la nuca e posa la testa sotto la mascella.",
-    meta: "Blackwork · serpente",
+    body: "Un serpente nasce dietro la nuca, scende lungo il collo e si chiude attorno a una rosa. Sul petto, la pietra della fionda apre le ali.",
+    meta: "Black & grey · serpente e rosa",
     align: "right",
   },
   {
@@ -140,8 +140,8 @@ export const STATIONS: Station[] = [
     lift: 0.04,
     index: "VIII",
     title: "La Custode",
-    body: "Regina del regno d'inchiostro. Tatuata dal collo ai fianchi, vestita d'inchiostro che sale.",
-    meta: "Bodysuit · ornamentale",
+    body: "Regina del regno d'inchiostro, con la pelle di chi tatua: rose sulle spalle, una ghirlanda di rose e peonie che le cinge la vita.",
+    meta: "Black & grey · realismo · rose",
     align: "center",
   },
 ];

@@ -17,6 +17,7 @@ import {
 import { makeFlashCanvas } from "./tattoo";
 import { computeTorsoFrame, makeTorsoTattooCanvas, TORSO_FIT, type TorsoVariant } from "./torsoTattoos";
 import { makeStatueTattoo } from "./statueTattoos";
+import { CUSTODE_FIT, CUSTODE_Y, makeCustodeWrap } from "./ritahTattoos";
 import { ROTUNDA, STATIONS } from "./stations";
 
 interface LightRig {
@@ -177,6 +178,8 @@ export class Gallery {
   coarse = false;
   /** stato per l'interfaccia: 0 niente, 1 invito a toccare il marmo, 2 l'ago sta disegnando */
   inkUi = 0;
+  /** solo sviluppo: camera libera e tatuaggi completi, per leggere l'anatomia e controllare i disegni */
+  inspect: { pos: [number, number, number]; look: [number, number, number] } | null = null;
   private ray = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private pointerOn = false;
@@ -220,7 +223,8 @@ export class Gallery {
   }
 
   // ------------------------------------------------------------------ build
-  async load(manager: THREE.LoadingManager, fontFamily: string, torsoMeta: TorsoMeta[], statueMeta: StatueMeta[]) {
+  /** `alive`: falso se la regia è stata smontata nel frattempo (Strict Mode, cambio pagina) */
+  async load(manager: THREE.LoadingManager, fontFamily: string, torsoMeta: TorsoMeta[], statueMeta: StatueMeta[], alive: () => boolean = () => true) {
     const draco = new DRACOLoader(manager);
     draco.setDecoderPath("/draco/");
     const loader = new GLTFLoader(manager);
@@ -248,20 +252,24 @@ export class Gallery {
     // griglia di lettura dei torsi al posto dei disegni (solo sviluppo): ?inkgrid
     const inkGrid = process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).has("inkgrid");
     const statueMat = (id: string, extra: InkStoneOptions = {}) => {
-      const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id)).map((t) => ({ ...t, tex: maskTexture(t.canvas, this.renderer, true) }));
+      const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id), inkGrid).map((t) => ({ ...t, tex: maskTexture(t.canvas, this.renderer, true) }));
       const m = makeInkStoneMaterial({ charts, envIntensity: 0.55, ...extra });
       // il disegno automatico parte dal punto d'appoggio della prima carta (sterno, gola)
       m.userData.inkOrigin = charts[0]?.C;
       return m;
     };
 
+    // i tatuaggi si disegnano sul thread principale: tra un'opera e l'altra si cede il passo,
+    // così il cerchio del loader continua a disegnarsi
+    const breathe = () => new Promise<boolean>((r) => setTimeout(() => r(alive()), 0));
     for (const b of BUSTS) {
       this.addBust(geo(b.id), statueMat(b.id, b.mat), b);
+      if (!(await breathe())) return;
     }
 
-    torsoMeta.forEach((meta, i) => {
+    for (const [i, meta] of torsoMeta.entries()) {
       const layout = TORSO_LAYOUT.find((l) => l.id === meta.id);
-      if (!layout) return;
+      if (!layout) continue;
       const frame = computeTorsoFrame(torsoGeos[i], meta.height, TORSO_FIT[layout.variant]);
       const c = makeTorsoTattooCanvas(layout.variant, frame, texScale, inkGrid);
       const mat = makeInkStoneMaterial({
@@ -278,13 +286,35 @@ export class Gallery {
         envIntensity: 0.5,
       });
       this.addTorso(torsoGeos[i], mat, meta, new THREE.Vector3(layout.x, 0, layout.z), layout.x < 0 ? Math.PI / 2 - 0.35 : -Math.PI / 2 + 0.35, layout.station, layout.spin ?? 0.07, layout.light);
-    });
+      if (!(await breathe())) return;
+    }
 
     const choirIds = Object.keys(CHOIR);
     this.choirMats = choirIds.map((id) => statueMat(id));
     this.choirMats.forEach((m) => ((m.userData.uniforms as Record<string, { value: number }>).uReveal.value = 1));
     this.buildChoir(choirIds.map(geo), choirIds);
-    this.buildRotunda(geo("KAS434"), statueMat("KAS434", { dressY: 1.1, envIntensity: 0.65 }));
+    if (!(await breathe())) return;
+    // la Custode (Ritah): il tronco è avvolto come un torso, collo e braccio hanno carte locali
+    const venusGeo = geo("KAS434");
+    const venusH = statueMeta.find((m) => m.id === "KAS434")?.height ?? 2.04;
+    const venusFrame = computeTorsoFrame(venusGeo, venusH, CUSTODE_FIT);
+    // ?inkgrid=charts: griglia solo sulle carte locali (collo, braccio), tronco pulito
+    const wrapGrid = inkGrid && new URLSearchParams(window.location.search).get("inkgrid") !== "charts";
+    const venusWrap = maskTexture(makeCustodeWrap(venusFrame, texScale, wrapGrid), this.renderer, true);
+    if (!(await breathe())) return;
+    this.buildRotunda(
+      venusGeo,
+      statueMat("KAS434", {
+        dressY: 1.1,
+        envIntensity: 0.65,
+        tattoo: venusWrap,
+        axis: venusFrame.axis,
+        axisH: venusH,
+        yRange: CUSTODE_Y,
+        // la Custode è la più illuminata: i grigi del black & grey vanno spinti, o il tonemapping li cancella
+        wrapGamma: 0.5,
+      }),
+    );
     this.buildFlashPanels(fontFamily);
     this.buildParticles();
   }
@@ -826,6 +856,13 @@ void main(){
     } else {
       lift = this.outroCamera(outro, time, mouse);
     }
+    // camera d'ispezione (solo sviluppo): window.__pc.gallery.inspect = { pos, look }
+    if (this.inspect) {
+      cam.position.set(...this.inspect.pos);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(...this.inspect.look);
+      lift = 0;
+    }
 
     if (lift > 0.001) cam.setViewOffset(this.w, this.h, 0, lift * this.h, this.w, this.h);
     else if (cam.view) cam.clearViewOffset();
@@ -1000,6 +1037,7 @@ void main(){
         }
       } else if (!e.started) e.dwell = 0;
       if (e.started) e.ink = Math.min(1, e.ink + dt * (touched ? INK_RATE_TOUCHED : INK_RATE_IDLE));
+      if (this.inspect) e.ink = 1;
       // la punta dell'ago: piena mentre disegna, tenue sul tatuaggio finito
       const want = touched ? (e.ink < 1 ? 1 : 0.3) : 0;
       if (touched && e.needle < 0.02) e.needlePt.copy(this.hit);

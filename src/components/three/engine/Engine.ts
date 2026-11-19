@@ -163,7 +163,7 @@ export class Engine {
       fetch("/models/statues/statues.json").then((r) => r.json()) as Promise<StatueMeta[]>,
     ]);
     if (this.disposed) return;
-    await this.gallery.load(manager, fontFamily, torsos, statues);
+    await this.gallery.load(manager, fontFamily, torsos, statues, () => !this.disposed);
     if (this.disposed) return;
     this.gallery.setSize(this.w, this.h);
     // Precompila entrambe le scene mentre il loader è ancora visibile.

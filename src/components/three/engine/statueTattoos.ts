@@ -22,6 +22,8 @@ import {
   type Ctx,
   type Rng,
 } from "./tattoo";
+import { davidChest, davidNeck } from "./davidTattoo";
+import { ritahCollo, ritahSleeve } from "./ritahTattoos";
 
 export interface Rect {
   x0: number;
@@ -167,111 +169,6 @@ export function lace(c: Ctx, x0: number, x1: number, y: number, r: number, lw: n
     arcStroke(c, x, top, r * 0.55, lw * 0.8);
     dot(c, x, top - r * 1.45, r * 0.22);
     dot(c, x + r, top + r * 0.28, r * 0.15);
-  }
-}
-
-/** serpente blackwork lungo una spline: corpo pieno, scaglie in negativo, testa con lingua biforcuta */
-function serpent(c: Ctx, ctrl: Pt[], wMax: number, lw: number) {
-  const P = (i: number) => ctrl[Math.max(0, Math.min(ctrl.length - 1, i))];
-  const pts: Pt[] = [];
-  for (let i = 0; i < ctrl.length - 1; i++) {
-    const [p0, p1, p2, p3] = [P(i - 1), P(i), P(i + 1), P(i + 2)];
-    for (let j = 0; j < 30; j++) {
-      const t = j / 30;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const f = (a: number, b: number, cc: number, d: number) =>
-        0.5 * (2 * b + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3);
-      pts.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
-    }
-  }
-  pts.push(ctrl[ctrl.length - 1]);
-  const L = [0];
-  for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-  const total = L[L.length - 1];
-  const width = (s: number) => {
-    const t = s / total;
-    return wMax * (t < 0.55 ? 0.06 + 0.94 * Math.sin((t / 0.55) * (Math.PI / 2)) : 1 - (t - 0.55) * 0.5);
-  };
-  const tangent = (i: number): Pt => {
-    const a = pts[Math.max(0, i - 1)];
-    const b = pts[Math.min(pts.length - 1, i + 1)];
-    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-    return [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
-  };
-  const side = (i: number, k: number): Pt => {
-    const [tx, ty] = tangent(i);
-    const w = (width(L[i]) / 2) * k;
-    return [pts[i][0] - ty * w, pts[i][1] + tx * w];
-  };
-  const at = (s: number) => {
-    let i = 0;
-    while (i < L.length - 1 && L[i] < s) i++;
-    return i;
-  };
-  // corpo
-  ink(c);
-  const left = pts.map((_, i) => side(i, 1));
-  const right = pts.map((_, i) => side(i, -1)).reverse();
-  poly(c, [...left, ...right]);
-  // scaglie: reticolo a rombi in negativo
-  erase(c);
-  const step = wMax * 0.3;
-  for (let s = step * 0.5; s < total - step; s += step) {
-    const i0 = at(s);
-    const i1 = at(s + step);
-    const a = side(i0, 0.86);
-    const b = side(i1, -0.86);
-    const a2 = side(i0, -0.86);
-    const b2 = side(i1, 0.86);
-    line(c, a[0], a[1], b[0], b[1], lw * 0.45);
-    line(c, a2[0], a2[1], b2[0], b2[1], lw * 0.45);
-  }
-  // dorso: rombi pieni lungo la spina
-  for (let s = step; s < total - step * 1.5; s += step * 2) {
-    const i = at(s);
-    const [tx, ty] = tangent(i);
-    const w = width(s) * 0.24;
-    const [x, y] = pts[i];
-    poly(c, [
-      [x + tx * w * 1.4, y + ty * w * 1.4],
-      [x - ty * w * 0.6, y + tx * w * 0.6],
-      [x - tx * w * 1.4, y - ty * w * 1.4],
-      [x + ty * w * 0.6, y - tx * w * 0.6],
-    ]);
-  }
-  ink(c);
-  // testa
-  const end = pts[pts.length - 1];
-  const [dx, dy] = tangent(pts.length - 1);
-  const nx = -dy;
-  const ny = dx;
-  const we = width(total) / 2;
-  const H = (f: number, g: number): Pt => [end[0] + dx * f + nx * g, end[1] + dy * f + ny * g];
-  const hw = wMax * 0.62;
-  c.beginPath();
-  const head: Pt[] = [H(-0.01, we), H(wMax * 0.5, hw), H(wMax * 1.05, hw * 0.55), H(wMax * 1.3, 0), H(wMax * 1.05, -hw * 0.55), H(wMax * 0.5, -hw), H(-0.01, -we)];
-  poly(c, head);
-  erase(c);
-  for (const s of [1, -1]) {
-    const [ex, ey] = H(wMax * 0.62, s * hw * 0.55);
-    dot(c, ex, ey, wMax * 0.11);
-    const [cx1, cy1] = H(wMax * 0.25, s * hw * 0.3);
-    const [cx2, cy2] = H(wMax * 0.9, s * hw * 0.15);
-    line(c, cx1, cy1, cx2, cy2, lw * 0.5);
-  }
-  ink(c);
-  for (const s of [1, -1]) {
-    const [ex, ey] = H(wMax * 0.62, s * hw * 0.55);
-    dot(c, ex + dx * wMax * 0.02, ey + dy * wMax * 0.02, wMax * 0.035);
-  }
-  // lingua
-  const [tx0, ty0] = H(wMax * 1.3, 0);
-  const [tx1, ty1] = H(wMax * 1.9, 0);
-  line(c, tx0, ty0, tx1, ty1, lw * 0.7);
-  for (const s of [1, -1]) {
-    const [fx, fy] = H(wMax * 2.2, s * wMax * 0.22);
-    line(c, tx1, ty1, fx, fy, lw * 0.6);
   }
 }
 
@@ -497,81 +394,6 @@ const nefertitiCorona: Design = (c, rng, _f, _p, { R }) => {
   dot(c, 0, 0.088, 0.004);
 };
 
-/** Il gigante · un serpente si avvolge attorno al collo e posa la testa sotto la mascella */
-const davidCollo: Design = (c, _rng, _f, _p, { R }) => {
-  const lw = 0.004;
-  const turns = 1.12;
-  const phi0 = 0.12 * Math.PI - turns * TAU;
-  const ctrl: Pt[] = [];
-  const n = 14;
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const phi = phi0 + (0.12 * Math.PI - phi0) * t;
-    // sale piano dietro il collo e risale sotto il mento
-    ctrl.push([R * phi, -0.04 + t * 0.088 + Math.sin(t * TAU * turns) * 0.007]);
-  }
-  const w = Math.min(0.055, R * 0.45);
-  for (const shift of [0, TAU * R]) serpent(c, ctrl.map(([u, v]) => [u + shift, v]), w, lw);
-};
-
-/** Venere, la Custode · girocollo a punte (una corona abbassata al collo) */
-const venereCollo: Design = (c, _rng, _f, _p, { R }) => {
-  const lw = 0.002;
-  const L = Math.PI * R;
-  line(c, -L, -0.005, L, -0.005, lw);
-  line(c, -L, 0.009, L, 0.009, lw * 0.7);
-  for (let u = -L, i = 0; u < L; u += 0.009, i++) {
-    const tall = i % 2 === 0;
-    poly(c, [
-      [u - 0.0032, -0.005],
-      [u, -0.005 + (tall ? 0.0105 : 0.0062)],
-      [u + 0.0032, -0.005],
-    ]);
-  }
-  chain(c, 0, -0.007, 0.012, 0.0055, 0.0014, 0.01, 0.003);
-};
-
-/** Venere, la Custode · mandala sullo sterno, un lampadario di gocce tra i seni, una colonna di gioielli fino all'ombelico */
-const venerePetto: Design = (c, rng) => {
-  const lw = 0.0024;
-  mandala(c, rng, 0, 0, 0.042, lw, 14);
-  circle(c, 0, 0, 0.048, lw * 2.2);
-  for (let i = 0; i < 36; i++) {
-    const a = (i / 36) * TAU;
-    dot(c, Math.cos(a) * 0.055, Math.sin(a) * 0.055, i % 2 ? 0.0013 : 0.0022);
-  }
-  // clavicole: due archi di puntini che salgono verso le spalle
-  for (const s of [-1, 1]) {
-    for (let i = 0; i <= 16; i++) {
-      const t = i / 16;
-      dot(c, s * (0.05 + t * 0.17), 0.04 + t * 0.06 - t * t * 0.025, 0.0018 - t * 0.0008);
-    }
-  }
-  // lampadario: un arco di perle sotto il mandala e catenelle di lunghezze diverse
-  swag(c, -0.05, -0.03, 0.05, -0.03, 0.022, { lw: lw * 0.8, bead: 0.0016, step: 0.0085 });
-  for (const [x, len] of [
-    [-0.036, 0.018],
-    [-0.02, 0.034],
-    [0.02, 0.034],
-    [0.036, 0.018],
-  ]) {
-    const top = -0.03 - 0.044 * (1 - Math.pow(Math.abs(x) / 0.05, 2)) * 0.5;
-    chain(c, x, top, len, 0.0062, 0.0015, 0.011, 0.0032);
-  }
-  // colonna dello sterno fino all'ombelico
-  for (let d = 0.065, i = 0; d < 0.31; d += 0.0095, i++) {
-    const t = (d - 0.065) / 0.245;
-    const x = t * 0.03;
-    if (i % 4 === 2) diamond(c, x, -d, 0.0075, 0.012);
-    else dot(c, x, -d, 0.0021 - t * 0.0007);
-  }
-  circle(c, 0.034, -0.338, 0.019, lw * 1.4);
-  for (let i = 0; i < 18; i++) {
-    const a = (i / 18) * TAU;
-    dot(c, 0.034 + Math.cos(a) * 0.026, -0.338 + Math.sin(a) * 0.026, 0.0016);
-  }
-};
-
 /** Teste del coro: un solo segno ciascuna, al collo o sotto la gola */
 const heraPetto: Design = (c) => {
   circle(c, 0, 0, 0.012, 0.0022);
@@ -605,6 +427,8 @@ interface ChartSpec {
   R?: number;
   tol?: number;
   facing?: number;
+  /** esponente sui grigi (black & grey: < 1) */
+  gamma?: number;
   rect: Rect | ((R: number) => Rect);
   px: number;
   draw: Design;
@@ -642,17 +466,23 @@ export const STATUE_TATTOOS: Record<string, Spec> = {
       { ...neck([-0.005, 0.44], -0.02, 0.16, 2048, nefertitiCorona), tol: 0.6 },
     ],
   },
+  // Il gigante: collo a giro completo (rosa e serpente) e petto (pietra alata), black & grey
   KAS2232: {
     yaw: 0.7,
     seed: 2232,
-    charts: [{ ...neck([0.07, 0.45], -0.11, 0.2, 2560, davidCollo), nr: 0.04, tol: 0.7 }],
+    charts: [
+      { ...neck([0.07, 0.45], -0.2, 0.33, 3072, davidNeck), nr: 0.04, tol: 0.7, gamma: 0.62 },
+      { at: [0.07, 0.28], nr: 0.08, tol: 0.6, facing: -0.1, gamma: 0.62, rect: { x0: -0.36, y0: -0.3, w: 0.72, h: 0.34 }, px: 2560, draw: davidChest },
+    ],
   },
+  // la Custode (Ritah): il tronco è una carta avvolta a parte (ritahTattoos.ts); qui solo il collo
   KAS434: {
     yaw: 0,
     seed: 434,
     charts: [
-      { at: [0.02, 1.6], nr: 0.08, tol: 0.6, facing: -0.05, rect: { x0: -0.28, y0: -0.37, w: 0.56, h: 0.47 }, px: 3072, draw: venerePetto },
-      { ...neck([-0.02, 1.758], -0.03, 0.045, 2048, venereCollo), tol: 0.3 },
+      { ...neck([-0.02, 1.758], -0.04, 0.09, 2048, ritahCollo), tol: 0.3, gamma: 0.38 },
+      // manica: cilindro attorno al braccio destro (a sinistra di chi guarda), dal moncherino alla spalla
+      { at: [-0.24, 1.52], level: true, nr: 0.03, R: 0.062, tol: 0.35, facing: -0.5, rect: lap(-0.1, 0.26), px: 2048, draw: ritahSleeve, gamma: 0.38 },
     ],
   },
   KAS622: { yaw: 0, seed: 622, charts: [{ at: [0.0, 0.235], nr: 0.04, tol: 0.6, facing: 0, rect: { x0: -0.02, y0: -0.02, w: 0.04, h: 0.04 }, px: 512, draw: heraPetto }] },
@@ -738,16 +568,43 @@ export interface StatueTattooChart {
   rect: Rect;
   tol: number;
   facing: number;
+  gamma: number;
 }
 
-export function makeStatueTattoo(id: string, fontFamily: string, scale: number, geo: THREE.BufferGeometry): StatueTattooChart[] {
+/** griglia di lettura della carta (solo sviluppo, ?inkgrid): linee ogni 1 cm, più spesse ogni 5, etichette u|v in cm */
+function chartGrid(c: Ctx, pen: ReturnType<typeof makePen>, rect: Rect) {
+  const x0 = Math.ceil(rect.x0 * 100) / 100;
+  const y0 = Math.ceil(rect.y0 * 100) / 100;
+  for (let x = x0; x <= rect.x0 + rect.w; x += 0.01) {
+    const cm = Math.round(x * 100);
+    line(c, x, rect.y0, x, rect.y0 + rect.h, cm === 0 ? 0.0016 : cm % 5 === 0 ? 0.0009 : 0.00035);
+  }
+  for (let y = y0; y <= rect.y0 + rect.h; y += 0.01) {
+    const cm = Math.round(y * 100);
+    line(c, rect.x0, y, rect.x0 + rect.w, y, cm === 0 ? 0.0016 : cm % 5 === 0 ? 0.0009 : 0.00035);
+  }
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.font = `600 ${Math.max(9, Math.round(0.0042 * pen.k))}px monospace`;
+  c.textAlign = "left";
+  for (let y = Math.ceil(rect.y0 * 20) / 20; y < rect.y0 + rect.h; y += 0.05) {
+    for (let x = Math.ceil(rect.x0 * 20) / 20; x < rect.x0 + rect.w; x += 0.05) {
+      const [px, py] = pen.toPx(x + 0.001, y + 0.0015);
+      c.fillText(`${Math.round(x * 100)}|${Math.round(y * 100)}`, px, py);
+    }
+  }
+  c.restore();
+}
+
+export function makeStatueTattoo(id: string, fontFamily: string, scale: number, geo: THREE.BufferGeometry, grid = false): StatueTattooChart[] {
   const s = STATUE_TATTOOS[id];
   const rng = mulberry32(s.seed);
   return s.charts.map((spec) => {
     const a = anchorChart(geo, spec, s.yaw);
     const rect = typeof spec.rect === "function" ? spec.rect(a.R) : spec.rect;
     const pen = makePen(rect, Math.round(spec.px * scale));
-    spec.draw(pen.c, rng, fontFamily, pen, { R: a.R, rect });
-    return { canvas: pen.canvas, ...a, rect, tol: spec.tol ?? 0.6, facing: spec.facing ?? 0 };
+    if (grid) chartGrid(pen.c, pen, rect);
+    else spec.draw(pen.c, rng, fontFamily, pen, { R: a.R, rect });
+    return { canvas: pen.canvas, ...a, rect, tol: spec.tol ?? 0.6, facing: spec.facing ?? 0, gamma: grid ? 1 : (spec.gamma ?? 1) };
   });
 }

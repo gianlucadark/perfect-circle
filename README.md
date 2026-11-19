@@ -40,9 +40,9 @@ In sviluppo, `window.__pc.seek(0..1)` porta il percorso a un punto preciso.
    - **Flash**: tavole che si disegnano da sole;
    - **Nefertiti**: pietra nera e inchiostro d'oro, incorniciata dall'anello-soglia;
    - **sala dei corpi**, con i sei torsi;
-   - **Il gigante**: la testa del David di Michelangelo, con un serpente che sale sul collo;
+   - **Il gigante**: la testa del David di Michelangelo. Un serpente black & grey gira dietro la nuca, scende lungo il collo e si chiude attorno a una rosa sulla gola; sul petto, la pietra della fionda con due ali sulle clavicole;
    - **coro** di dodici teste femminili con aureole;
-   - **La Custode**: Venere di Milo tatuata dalla corona ai fianchi, vestita d'inchiostro liquido che risale.
+   - **La Custode**: la Venere di Milo come Ritah, la tatuatrice dello studio. Rose in black & grey realistico sulle spalle, sul collo e sul braccio, e una ghirlanda di rose e peonie che le cinge la vita, dall'anca all'altro fianco passando sopra l'ombelico. Il seno resta pulito. È vestita d'inchiostro liquido che risale.
    Ogni opera arriva in marmo intatto. Il cursore che la sfiora (su touch: un tocco) fissa l'origine del tatuaggio in quel punto e l'inchiostro si propaga sulla superficie della scultura. Se nessuno la tocca, il tatuaggio comincia a disegnarsi da solo un attimo dopo che l'opera è inquadrata (~0,65 s). I tatuaggi seguono la forma del corpo: sono stencil srotolati sulla superficie, non proiezioni piatte. Ogni opera ha la sua luce: temperatura, taglio e fascio diversi.
 5. **Ascesa e ritorno.**
    - La camera sale lungo la Custode, si ferma sul volto e guarda in alto, nel pozzo della rotonda.
@@ -62,7 +62,9 @@ Ogni tatuaggio si disegna mentre la camera arriva: un fronte d'inchiostro avanza
   - `scroll.ts`: scroll virtuale senza fine (rotella, touch con inerzia, tastiera).
   - `stations.ts`: soste, testi, inquadrature per schermi verticali, lunghezze del percorso.
   - `gallery.ts`: architettura, opere, luci a pool, rotonda con oculo e pioggia, camera dell'ascesa.
-  - `statueTattoos.ts`: tatuaggi delle statue, disegnati in metri su viste ortografiche.
+  - `statueTattoos.ts`: tatuaggi delle statue, disegnati in metri su carte locali della pelle.
+  - `davidTattoo.ts`, `ritahTattoos.ts`: i pezzi grandi del gigante e della Custode (Ritah).
+  - `inkArt.ts`: primitive black & grey realistiche: rosa, peonia, foglie, serpente a scaglie, piume, sfera, fumo.
   - `torsoTattoos.ts`: tatuaggi dei torsi, su un cilindro il cui asse segue il tronco.
   - `tattoo.ts`: primitive di disegno, tavole flash.
   - `materials.ts`: marmo tatuato, anello liquido, membrana, pavimento a specchio, fasci, tavole flash.

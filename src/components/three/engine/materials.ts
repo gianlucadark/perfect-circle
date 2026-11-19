@@ -30,6 +30,8 @@ export interface InkStoneOptions {
   /** asse della proiezione cilindrica che segue il tronco: AXIS_LEVELS livelli (cx, cz, R) su [0, axisH] */
   axis?: Float32Array;
   axisH?: number;
+  /** esponente sui grigi della maschera avvolta (più basso = grigi più scuri, per opere molto illuminate) */
+  wrapGamma?: number;
   envIntensity?: number;
   /** tatuaggi "a stencil" che avvolgono il corpo (busti, statue): fino a tre carte, vedi InkChart */
   charts?: InkChart[];
@@ -60,12 +62,14 @@ export interface InkChart {
   tol: number;
   /** soglia di orientamento della superficie rispetto al cilindro (-1 = avvolge tutto) */
   facing: number;
+  /** esponente sui grigi della maschera (< 1: le sfumature black & grey si leggono sul marmo chiaro) */
+  gamma?: number;
 }
 
 /**
  * Marmo procedurale (scansioni senza texture) con tatuaggio, su MeshStandardMaterial.
- * - uTattoo: maschera R8 (bianco = inchiostro) in proiezione cilindrica (torsi);
- *   per busti e statue fino a tre carte locali (uTat0..2) che avvolgono il corpo (InkChart).
+ * - uTattoo: maschera R8 (bianco = inchiostro) in proiezione cilindrica attorno all'asse del tronco (torsi, Custode);
+ *   per busti e statue fino a tre carte locali (uTat0..2) che avvolgono il corpo (InkChart). Le due cose si sommano.
  * - uReveal: l'inchiostro si propaga dall'origine con bordo organico; il fronte brilla come un ago caldo.
  *   Con uInkPt.w = 1 l'origine è un punto della superficie (spazio oggetto): quello toccato dal cursore.
  * - uNeedle: punta luminosa che segue il cursore sul marmo (xyz spazio oggetto, w intensità).
@@ -89,7 +93,7 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
     uCN: { value: vec3s((c) => c.N) },
     uCT: { value: vec3s((c) => c.T) },
     uCRect: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].rect.x0, charts[i].rect.y0, charts[i].rect.w, charts[i].rect.h) : new THREE.Vector4(0, 0, 1, 1))) },
-    uCPar: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].R, charts[i].tol, charts[i].facing, 0) : new THREE.Vector4(1, 1, 0, 0))) },
+    uCPar: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].R, charts[i].tol, charts[i].facing, charts[i].gamma ?? 1) : new THREE.Vector4(1, 1, 0, 0))) },
     uReveal: { value: 0 },
     uInkColor: { value: new THREE.Color(o.inkColor ?? 0x020305) },
     uInkMetal: { value: o.inkMetal ?? 0 },
@@ -102,7 +106,8 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
     uAxisH: { value: o.axisH ?? 1 },
     uAxisOn: { value: o.axis ? 1 : 0 },
     uHasTattoo: { value: o.tattoo || charts.length ? 1 : 0 },
-    uProj: { value: charts.length ? 1 : 0 },
+    uWrap: { value: o.tattoo ? 1 : 0 },
+    uWrapGamma: { value: o.wrapGamma ?? 0.62 },
     uOrigin: { value: new THREE.Vector2(...(o.origin ?? [0.5, 0.2])) },
     uDressY: { value: o.dressY ?? -1 },
     uGlowCol: { value: new THREE.Color(o.glow ?? 0xff8a3d) },
@@ -125,7 +130,7 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
 varying vec3 vObj;
 varying vec3 vObjN;
 uniform sampler2D uTattoo, uTat0, uTat1, uTat2;
-uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uProj, uDressY, uSpan;
+uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uWrap, uWrapGamma, uDressY, uSpan;
 uniform int uCharts;
 uniform vec3 uCC[3], uCN[3], uCT[3];
 uniform vec4 uCRect[3], uCPar[3];
@@ -155,7 +160,7 @@ void pcChart(sampler2D tex, int i, vec3 p, vec3 n, inout float ink, inout float 
   vec2 inside = step(vec2(0.0), tuv) * step(tuv, vec2(1.0));
   w *= inside.x * inside.y;
   if (w <= 0.0) return;
-  ink = max(ink, textureGrad(tex, tuv, gx, gy).r * w);
+  ink = max(ink, pow(textureGrad(tex, tuv, gx, gy).r, uCPar[i].w) * w);
   bleed = max(bleed, textureGrad(tex, tuv, gx * 9.0, gy * 9.0).r * w);
 }
 float pcInk;
@@ -181,10 +186,11 @@ vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
         /* glsl */ `#include <map_fragment>
 {
   float wproj = 1.0;
-  float dist;
+  float dist = 0.0;
   float ink = 0.0;
   float bleed = 0.0;
-  if (uProj < 0.5) {
+  // avvolgimento del tronco (torsi, e il corpo della Custode) e carte locali possono convivere
+  if (uWrap > 0.5) {
     // l'asse del cilindro segue il centro del tronco quota per quota (torsi seduti, inclinati, ruotati)
     vec2 d = vObj.xz;
     float wface = 1.0;
@@ -202,9 +208,10 @@ vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
     if (abs(gy.x) > 0.5) gy.x -= sign(gy.x);
     dist = length(vec2((tuv.x - 0.5) * 1.6, tuv.y - uOrigin.y));
     // le sfumature black & grey del disegno devono leggersi sul marmo chiaro: i grigi salgono, il nero resta nero
-    ink = pow(textureGrad(uTattoo, tuv, gx, gy).r, 0.62) * wface;
+    ink = pow(textureGrad(uTattoo, tuv, gx, gy).r, uWrapGamma) * wface;
     bleed = textureGrad(uTattoo, tuv, gx * 9.0, gy * 9.0).r * wface;
-  } else {
+  }
+  if (uCharts > 0) {
     vec3 nObj = normalize(vObjN);
     if (uCharts > 0) pcChart(uTat0, 0, vObj, nObj, ink, bleed);
     if (uCharts > 1) pcChart(uTat1, 1, vObj, nObj, ink, bleed);
@@ -295,7 +302,7 @@ metalnessFactor = mix(metalnessFactor, uInkMetal, pcInk);`,
 totalEmissiveRadiance += uGlowCol * pcGlow * 11.0;`,
       );
   };
-  m.customProgramCacheKey = () => "inkstone5";
+  m.customProgramCacheKey = () => "inkstone6";
   return m;
 }
 
