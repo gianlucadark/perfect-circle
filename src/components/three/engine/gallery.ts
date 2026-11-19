@@ -24,7 +24,25 @@ interface LightRig {
   color: THREE.Color;
   intensity: number;
   angle: number;
+  penumbra: number;
+  /** forza del fascio visibile (0 = nessun fascio: la luce c'è ma non si vede in aria) */
+  beam: number;
   weight: number;
+}
+
+/**
+ * Illuminazione di una singola opera, come in una mostra: temperatura, taglio, morbidezza.
+ * `offset` sposta la sorgente rispetto alla sommità dell'opera (altrimenti alta e frontale).
+ */
+interface LightStyle {
+  hue?: number;
+  sat?: number;
+  light?: number;
+  angle?: number;
+  penumbra?: number;
+  intensity?: number;
+  beam?: number;
+  offset?: [number, number, number];
 }
 
 interface Exhibit {
@@ -37,7 +55,21 @@ interface Exhibit {
   follow: boolean;
   spin: number;
   baseYaw: number;
+  /** mesh su cui il cursore disegna il tatuaggio (assente = opera non interattiva) */
+  mesh?: THREE.Mesh;
+  ink: number;
+  started: boolean;
+  dwell: number;
+  hold: number;
+  needle: number;
+  needlePt: THREE.Vector3;
 }
+
+/** velocità del disegno: sotto il cursore, poi da solo; attesa prima del disegno automatico */
+const INK_RATE_TOUCHED = 0.55;
+const INK_RATE_IDLE = 0.16;
+const AUTO_DELAY_POINTER = 3.0;
+const AUTO_DELAY_TOUCH = 1.4;
 
 export interface TorsoMeta {
   id: string;
@@ -53,23 +85,33 @@ export interface StatueMeta {
   height: number;
 }
 
-const TORSO_LAYOUT: { id: string; variant: TorsoVariant; x: number; z: number; station: number; dark?: boolean; pour?: number; ink?: number; metal?: number; spin?: number }[] = [
-  { id: "KAS1048", variant: "valentini", x: -2.4, z: -19.6, station: 5 },
-  { id: "KAS2113", variant: "iris", x: 2.4, z: -21.6, station: 5, dark: true, ink: 0xa59c8b, metal: 1 },
-  { id: "KAS402", variant: "belvedere", x: -2.4, z: -24.2, station: 6 },
-  { id: "KAS100", variant: "psiche", x: 2.4, z: -26.8, station: 7 },
-  { id: "KAS1242", variant: "doriforo", x: -2.4, z: -29.4, station: 7 },
-  { id: "KAS425", variant: "apollo", x: 2.4, z: -32.0, station: 8, pour: 1, spin: 0 },
+const TORSO_LAYOUT: { id: string; variant: TorsoVariant; x: number; z: number; station: number; dark?: boolean; pour?: number; ink?: number; metal?: number; spin?: number; light?: LightStyle }[] = [
+  // luce calda classica, fascio morbido
+  { id: "KAS1048", variant: "valentini", x: -2.4, z: -19.6, station: 5, light: { beam: 0.7 } },
+  // marmo nero e inchiostro metallico: luce fredda radente di lato, senza fascio
+  { id: "KAS2113", variant: "iris", x: 2.4, z: -21.6, station: 5, dark: true, ink: 0xa59c8b, metal: 1, light: { hue: 0.6, sat: 0.18, light: 0.85, angle: 0.32, penumbra: 0.45, intensity: 36, beam: 0, offset: [0.9, 1.0, 1.5] } },
+  // ambra bassa e laterale, per leggere la spina dorsale
+  { id: "KAS402", variant: "belvedere", x: -2.4, z: -24.2, station: 6, light: { hue: 0.07, sat: 0.5, light: 0.78, angle: 0.34, penumbra: 0.7, intensity: 34, beam: 0.45, offset: [1.1, 2.6, 1.8] } },
+  // rosata e larghissima, quasi senza bordo
+  { id: "KAS100", variant: "psiche", x: 2.4, z: -26.8, station: 7, light: { hue: 0.03, sat: 0.3, light: 0.84, angle: 0.46, penumbra: 0.95, intensity: 26, beam: 0.3 } },
+  // neutra, stretta e zenitale
+  { id: "KAS1242", variant: "doriforo", x: -2.4, z: -29.4, station: 7, light: { hue: 0.12, sat: 0.15, light: 0.88, angle: 0.28, penumbra: 0.4, intensity: 40, beam: 1.1, offset: [0.3, 4.4, 0.6] } },
+  // ambra calda sulla colata
+  { id: "KAS425", variant: "apollo", x: 2.4, z: -32.0, station: 8, pour: 1, spin: 0, light: { hue: 0.08, sat: 0.6, light: 0.74, angle: 0.36, penumbra: 0.6, intensity: 38, beam: 0.9 } },
 ];
 
 const GOLD = new THREE.Color(0.62, 0.47, 0.26);
 
 /** busti sui plinti: posizione, scala d'esposizione, stazione che li rivela */
-const BUSTS: { id: string; x: number; z: number; yaw: number; scale: number; plinth: number; plinthW?: number; station: number; follow: boolean; mat?: InkStoneOptions }[] = [
-  { id: "KAS1819", x: -1.9, z: -5.0, yaw: 0.75, scale: 1.75, plinth: 0.95, station: 1, follow: true },
-  { id: "KAS1513", x: 1.9, z: -9.0, yaw: -0.75, scale: 1.2, plinth: 0.85, station: 2, follow: true },
-  { id: "DEP439", x: 0, z: -15.4, yaw: 0, scale: 1.9, plinth: 0.95, station: 4, follow: false, mat: { dark: 1, inkColor: GOLD, inkMetal: 1, inkRough: 0.22, glow: 0xffb35c } },
-  { id: "KAS2232", x: 0, z: -34.6, yaw: -0.65, scale: 1.25, plinth: 0.3, plinthW: 1.02, station: 8, follow: false },
+const BUSTS: { id: string; x: number; z: number; yaw: number; scale: number; plinth: number; plinthW?: number; station: number; follow: boolean; mat?: InkStoneOptions; light?: LightStyle }[] = [
+  // Costanza: luce calda e avvolgente, come un ritratto
+  { id: "KAS1819", x: -1.9, z: -5.0, yaw: 0.75, scale: 1.75, plinth: 0.95, station: 1, follow: true, light: { hue: 0.075, sat: 0.5, light: 0.8, angle: 0.44, penumbra: 0.95, intensity: 32, beam: 0.55 } },
+  // Antinoo: luce radente e fredda che scolpisce il blackwork, nessun fascio in aria
+  { id: "KAS1513", x: 1.9, z: -9.0, yaw: -0.75, scale: 1.2, plinth: 0.85, station: 2, follow: true, light: { hue: 0.58, sat: 0.12, light: 0.86, angle: 0.3, penumbra: 0.55, intensity: 40, beam: 0, offset: [1.2, 1.3, 1.6] } },
+  // Nefertiti: occhio di bue dorato, stretto e alto, un solo fascio deciso
+  { id: "DEP439", x: 0, z: -15.4, yaw: 0, scale: 1.9, plinth: 0.95, station: 4, follow: false, mat: { dark: 1, inkColor: GOLD, inkMetal: 1, inkRough: 0.22, glow: 0xffb35c }, light: { hue: 0.1, sat: 0.7, light: 0.7, angle: 0.26, penumbra: 0.3, intensity: 58, beam: 1.5, offset: [0, 4.8, 0.7] } },
+  // Il gigante: zenitale e fredda, spostata di lato
+  { id: "KAS2232", x: 0, z: -34.6, yaw: -0.65, scale: 1.25, plinth: 0.3, plinthW: 1.02, station: 8, follow: false, light: { hue: 0.6, sat: 0.1, light: 0.88, angle: 0.38, penumbra: 0.6, intensity: 52, beam: 0.9, offset: [-0.6, 5.2, 0.9] } },
 ];
 
 /** teste del coro: scala e quota del centro della testa (spazio oggetto) */
@@ -129,6 +171,20 @@ export class Gallery {
   fov0 = 42;
   oculusY = 21;
   stationFloat = 0;
+  /** il cursore può tatuare le opere (deciso dalla regia: galleria visibile, niente transizioni) */
+  interactive = false;
+  /** dispositivo touch: niente hover, si tocca la statua */
+  coarse = false;
+  /** stato per l'interfaccia: 0 niente, 1 invito a toccare il marmo, 2 l'ago sta disegnando */
+  inkUi = 0;
+  private ray = new THREE.Raycaster();
+  private pointer = new THREE.Vector2();
+  private pointerOn = false;
+  private tapPending = false;
+  private castClock = 0;
+  private hovered: Exhibit | null = null;
+  private hit = new THREE.Vector3();
+  private castList: THREE.Mesh[] = [];
 
   constructor(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer;
@@ -220,7 +276,7 @@ export class Gallery {
         yRange: [0, meta.height],
         envIntensity: 0.5,
       });
-      this.addTorso(torsoGeos[i], mat, meta, new THREE.Vector3(layout.x, 0, layout.z), layout.x < 0 ? Math.PI / 2 - 0.35 : -Math.PI / 2 + 0.35, layout.station, layout.spin ?? 0.07);
+      this.addTorso(torsoGeos[i], mat, meta, new THREE.Vector3(layout.x, 0, layout.z), layout.x < 0 ? Math.PI / 2 - 0.35 : -Math.PI / 2 + 0.35, layout.station, layout.spin ?? 0.07, layout.light);
     });
 
     const choirIds = Object.keys(CHOIR);
@@ -284,15 +340,36 @@ export class Gallery {
     for (let z = 3; z > -57; z -= 3.3) zs.push(z);
     const slabs = new THREE.InstancedMesh(slabGeo, stone, zs.length * 2);
     let k = 0;
-    const slitMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.93, 0.84).multiplyScalar(1.5), fog: false });
-    const slitGeo = new THREE.PlaneGeometry(0.045, 6.4);
+    // fessure di luce con ritmo irregolare: altezze, temperature e intensità diverse,
+    // più deboli accanto alle opere, così ogni opera resta illuminata dalla sua luce
+    const slitMats = [
+      new THREE.Color(1.0, 0.93, 0.84).multiplyScalar(1.5),
+      new THREE.Color(1.0, 0.86, 0.7).multiplyScalar(0.95),
+      new THREE.Color(0.8, 0.88, 1.0).multiplyScalar(0.8),
+      new THREE.Color(1.0, 0.93, 0.84).multiplyScalar(0.45),
+    ].map((color) => new THREE.MeshBasicMaterial({ color, fog: false }));
+    const slitGeo = new THREE.PlaneGeometry(0.045, 1);
+    const workZ = [...BUSTS.map((b) => b.z), ...TORSO_LAYOUT.map((t) => t.z)];
+    const hash = (n: number) => {
+      const x = Math.sin(n * 12.9898) * 43758.5453;
+      return x - Math.floor(x);
+    };
     zs.forEach((z, i) => {
       for (const s of [-1, 1]) {
         this.tmpM.makeTranslation(s * 6.1, 4, z);
         slabs.setMatrixAt(k++, this.tmpM);
         if ((i + (s > 0 ? 1 : 0)) % 2 === 0 && z < 0) {
-          const slit = new THREE.Mesh(slitGeo, slitMat);
-          slit.position.set(s * 6.05, 3.4, z - 1.65);
+          const r1 = hash(i * 2 + (s > 0 ? 1 : 0) + 0.5);
+          const r2 = hash(i * 7.3 + s * 3.1);
+          const sz = z - 1.65;
+          const nearWork = workZ.some((wz) => Math.abs(wz - sz) < 1.4);
+          const tall = r1 > 0.55;
+          const len = tall ? 5.2 + r1 * 1.2 : 1.6 + r1 * 2.6;
+          const y = tall ? 3.4 : 0.6 + len / 2 + r2 * (6.2 - len);
+          const mat = nearWork ? slitMats[3] : slitMats[r2 < 0.5 ? 0 : r2 < 0.78 ? 1 : 2];
+          const slit = new THREE.Mesh(slitGeo, mat);
+          slit.scale.y = len;
+          slit.position.set(s * 6.05, y, sz);
           slit.rotation.y = (-s * Math.PI) / 2;
           this.scene.add(slit);
         }
@@ -326,13 +403,20 @@ export class Gallery {
     }
   }
 
-  private makeRig(top: THREE.Vector3, h: number, angle = 0.36, intensity = 34, color = new THREE.Color().setHSL(0.09, 0.35, 0.82)): LightRig {
+  private makeRig(top: THREE.Vector3, h: number, angle = 0.36, intensity = 34, style: LightStyle = {}): LightRig {
+    const o = style.offset;
+    const pos = o ? new THREE.Vector3(top.x + o[0], top.y + o[1], top.z + o[2]) : new THREE.Vector3(top.x * 0.55, 6.2, top.z + 1.6);
+    const target = new THREE.Vector3(top.x, top.y - h * 0.4, top.z);
+    // l'intensità dello stile è quella percepita alla distanza della luce standard (~5 m, decadimento 1.6)
+    const falloff = Math.pow(Math.min(1, pos.distanceTo(target) / 5), 1.6);
     return {
-      pos: new THREE.Vector3(top.x * 0.55, 6.2, top.z + 1.6),
-      target: new THREE.Vector3(top.x, top.y - h * 0.4, top.z),
-      color,
-      intensity,
-      angle,
+      pos,
+      target,
+      color: new THREE.Color().setHSL(style.hue ?? 0.09, style.sat ?? 0.35, style.light ?? 0.82),
+      intensity: (style.intensity ?? intensity) * falloff,
+      angle: style.angle ?? angle,
+      penumbra: style.penumbra ?? 0.75,
+      beam: style.beam ?? 1,
       weight: 0,
     };
   }
@@ -342,7 +426,8 @@ export class Gallery {
     const radius = Math.tan(rig.angle) * len * 0.85;
     const geo = new THREE.CylinderGeometry(0.04, radius, len, 48, 1, true);
     geo.translate(0, -len / 2, 0);
-    const beam = new THREE.Mesh(geo, makeBeamMaterial(0xffe9cf, 0.11));
+    const beam = new THREE.Mesh(geo, makeBeamMaterial(rig.color.clone().lerp(new THREE.Color(1, 1, 1), 0.35), 0.11));
+    beam.visible = rig.beam > 0;
     beam.position.copy(rig.pos);
     const dir = rig.target.clone().sub(rig.pos).normalize();
     beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
@@ -385,11 +470,24 @@ export class Gallery {
     this.scene.add(root);
     const H = bb.max.y * b.scale;
     const top = new THREE.Vector3(b.x, b.plinth + H * 0.8, b.z);
-    const rig = this.makeRig(top, H * 0.7, H > 1.3 ? 0.42 : 0.36, H > 1.3 ? 46 : 34);
-    this.exhibits.push({ root, pivot, mats: [mat], revealStation: b.station, rig, beam: this.makeBeam(rig), follow: b.follow, spin: 0, baseYaw: b.yaw });
+    const rig = this.makeRig(top, H * 0.7, H > 1.3 ? 0.42 : 0.36, H > 1.3 ? 46 : 34, b.light);
+    this.exhibits.push(this.exhibit({ root, pivot, mats: [mat], revealStation: b.station, rig, beam: this.makeBeam(rig), follow: b.follow, baseYaw: b.yaw }, mesh));
   }
 
-  private addTorso(geo: THREE.BufferGeometry, mat: THREE.MeshStandardMaterial, meta: TorsoMeta, pos: THREE.Vector3, yaw: number, station: number, spin: number) {
+  /** opera con stato del disegno; con `mesh` il cursore può tatuarla */
+  private exhibit(e: Pick<Exhibit, "root" | "pivot" | "mats" | "revealStation" | "rig" | "beam" | "follow" | "baseYaw"> & { spin?: number }, mesh?: THREE.Mesh): Exhibit {
+    if (mesh) {
+      const g = mesh.geometry;
+      g.computeBoundingBox();
+      const size = g.boundingBox!.getSize(this.tmpV);
+      const span = Math.max(size.x, size.y, size.z) * 0.9;
+      e.mats.forEach((m) => ((m.userData.uniforms as Record<string, { value: number }>).uSpan.value = span));
+      g.computeBoundingSphere();
+    }
+    return { spin: 0, ...e, mesh, ink: 0, started: false, dwell: 0, hold: 0, needle: 0, needlePt: new THREE.Vector3() };
+  }
+
+  private addTorso(geo: THREE.BufferGeometry, mat: THREE.MeshStandardMaterial, meta: TorsoMeta, pos: THREE.Vector3, yaw: number, station: number, spin: number, light?: LightStyle) {
     const ph = 0.82;
     this.plinth(0.7, ph, pos);
     const disc = new THREE.Mesh(
@@ -408,8 +506,8 @@ export class Gallery {
     root.add(pivot);
     this.scene.add(root);
     const top = new THREE.Vector3(pos.x, ph + meta.height, pos.z);
-    const rig = this.makeRig(top, meta.height, 0.38, 30);
-    this.exhibits.push({ root, pivot, mats: [mat], revealStation: station, rig, beam: this.makeBeam(rig), follow: spin > 0, spin: 0, baseYaw: yaw });
+    const rig = this.makeRig(top, meta.height, 0.38, 30, light);
+    this.exhibits.push(this.exhibit({ root, pivot, mats: [mat], revealStation: station, rig, beam: this.makeBeam(rig), follow: spin > 0, baseYaw: yaw }, inner));
   }
 
   private buildChoir(geos: THREE.BufferGeometry[], ids: string[]) {
@@ -495,17 +593,21 @@ export class Gallery {
     venus.castShadow = true;
     venus.receiveShadow = true;
     this.scene.add(venus);
-    this.exhibits.push({
-      root: venus,
-      pivot: venus,
-      mats: [venusMat],
-      revealStation: STATIONS.length - 1,
-      rig: { pos: new THREE.Vector3(), target: new THREE.Vector3(), color: new THREE.Color(), intensity: 0, angle: 0.3, weight: 0 },
-      beam: new THREE.Mesh(),
-      follow: false,
-      spin: 0,
-      baseYaw: 0,
-    });
+    this.exhibits.push(
+      this.exhibit(
+        {
+          root: venus,
+          pivot: venus,
+          mats: [venusMat],
+          revealStation: STATIONS.length - 1,
+          rig: { pos: new THREE.Vector3(), target: new THREE.Vector3(), color: new THREE.Color(), intensity: 0, angle: 0.3, penumbra: 0.75, beam: 0, weight: 0 },
+          beam: new THREE.Mesh(),
+          follow: false,
+          baseYaw: 0,
+        },
+        venus,
+      ),
+    );
 
     // corona: anello di luce sopra la testa con tre gocce in orbita
     const crown = new THREE.Group();
@@ -534,7 +636,7 @@ export class Gallery {
     key.shadow.bias = -0.0004;
     key.shadow.radius = 4;
     this.scene.add(key, key.target);
-    this.makeBeam({ pos: key.position.clone(), target: key.target.position.clone(), color: key.color, intensity: 0, angle: 0.36, weight: 0 });
+    this.makeBeam({ pos: key.position.clone(), target: key.target.position.clone(), color: key.color, intensity: 0, angle: 0.36, penumbra: 0.6, beam: 1, weight: 0 });
     // luce lunare dall'oculo
     const moon = new THREE.SpotLight(0xc9d6ff, 38, 26, 0.2, 0.7, 1.2);
     moon.position.set(c.x, 16, c.z);
@@ -729,9 +831,13 @@ void main(){
     cam.updateProjectionMatrix();
 
     const camPos = cam.position;
+    cam.updateMatrixWorld();
+    this.updateInk(dt);
     this.exhibits.forEach((e) => {
-      const rv = smoothstep(e.revealStation - 0.62, e.revealStation - 0.02, this.stationFloat);
-      e.mats.forEach((m) => ((m.userData.uniforms as Record<string, { value: number }>).uReveal.value = rv));
+      if (!e.mesh) {
+        const rv = smoothstep(e.revealStation - 0.62, e.revealStation - 0.02, this.stationFloat);
+        e.mats.forEach((m) => ((m.userData.uniforms as Record<string, { value: number }>).uReveal.value = rv));
+      }
       if (e.follow) {
         const target = Math.atan2(camPos.x - e.root.position.x, camPos.z - e.root.position.z);
         let d = target - e.baseYaw;
@@ -744,7 +850,7 @@ void main(){
       if (e.rig.intensity > 0) {
         const dist = camPos.distanceTo(e.root.position);
         e.rig.weight = smoothstep(16, 4, dist);
-        ((e.beam.material as THREE.ShaderMaterial).uniforms.uStrength.value as number) = 0.02 + 0.06 * e.rig.weight;
+        ((e.beam.material as THREE.ShaderMaterial).uniforms.uStrength.value as number) = (0.02 + 0.06 * e.rig.weight) * e.rig.beam;
       }
     });
     const sorted = this.exhibits.filter((e) => e.rig.intensity > 0).sort((a, b) => b.rig.weight - a.rig.weight);
@@ -759,6 +865,7 @@ void main(){
       l.target.updateMatrixWorld();
       l.color.copy(e.rig.color);
       l.angle = e.rig.angle;
+      l.penumbra = e.rig.penumbra;
       l.intensity = e.rig.intensity * e.rig.weight;
     });
 
@@ -802,6 +909,104 @@ void main(){
       }
       this.drops.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  // ------------------------------------------------------------------ inchiostro sotto il cursore
+  /** posizione del puntatore in coordinate normalizzate (-1..1) */
+  setPointer(x: number, y: number) {
+    this.pointer.set(x, y);
+    this.pointerOn = true;
+  }
+
+  clearPointer() {
+    this.pointerOn = false;
+  }
+
+  /** tocco su schermi touch: il disegno parte dal punto toccato */
+  tap(x: number, y: number) {
+    this.pointer.set(x, y);
+    this.tapPending = true;
+  }
+
+  /**
+   * Ogni opera arriva in marmo intatto. Il cursore che la sfiora fissa l'origine del tatuaggio in
+   * quel punto della superficie e l'inchiostro si propaga da lì; lontano dal cursore il disegno
+   * prosegue piano fino a completarsi. Se nessuno la tocca, dopo una breve sosta si disegna da sola.
+   * Tornando indietro oltre la sua stazione l'opera ritorna marmo, e al giro successivo si ridisegna.
+   */
+  private updateInk(dt: number) {
+    const cam = this.camera;
+    this.castClock -= dt;
+    if (!this.interactive) {
+      this.hovered = null;
+      this.tapPending = false;
+    } else if (this.tapPending || (this.pointerOn && this.castClock <= 0)) {
+      this.castClock = 0.06;
+      this.castList.length = 0;
+      for (const e of this.exhibits) {
+        if (!e.mesh || cam.position.distanceTo(e.root.position) > 8) continue;
+        e.mesh.updateWorldMatrix(true, false);
+        this.castList.push(e.mesh);
+      }
+      let found: Exhibit | null = null;
+      if (this.castList.length) {
+        this.ray.setFromCamera(this.pointer, cam);
+        const hit = this.ray.intersectObjects(this.castList, false)[0];
+        if (hit) {
+          found = this.exhibits.find((e) => e.mesh === hit.object) ?? null;
+          this.hit.copy(hit.point);
+          hit.object.worldToLocal(this.hit);
+        }
+      }
+      if (this.tapPending) {
+        for (const e of this.exhibits) e.hold = 0;
+        if (found) found.hold = 1.6;
+        this.hovered = null;
+      } else this.hovered = found;
+      this.tapPending = false;
+    }
+    if (!this.pointerOn) this.hovered = null;
+
+    const sf = this.stationFloat;
+    let ui = 0;
+    for (const e of this.exhibits) {
+      if (!e.mesh) continue;
+      const hovered = e === this.hovered;
+      const tapped = e.hold > 0;
+      const touched = hovered || tapped;
+      e.hold = Math.max(0, e.hold - dt);
+      if (sf < e.revealStation - 0.75) {
+        e.ink = 0;
+        e.started = false;
+        e.dwell = 0;
+      }
+      if (touched && !e.started) {
+        e.started = true;
+        e.mats.forEach((m) => (m.userData.uniforms as Record<string, { value: THREE.Vector4 }>).uInkPt.value.set(this.hit.x, this.hit.y, this.hit.z, 1));
+      }
+      const focus = this.interactive && Math.abs(sf - e.revealStation) < 0.45;
+      if (focus && !e.started) {
+        e.dwell += dt;
+        if (e.dwell > (this.coarse ? AUTO_DELAY_TOUCH : AUTO_DELAY_POINTER)) {
+          e.started = true;
+          e.mats.forEach((m) => (m.userData.uniforms as Record<string, { value: THREE.Vector4 }>).uInkPt.value.setW(0));
+        }
+      }
+      if (e.started) e.ink = Math.min(1, e.ink + dt * (touched ? INK_RATE_TOUCHED : INK_RATE_IDLE));
+      // la punta dell'ago: piena mentre disegna, tenue sul tatuaggio finito
+      const want = touched ? (e.ink < 1 ? 1 : 0.3) : 0;
+      if (touched && e.needle < 0.02) e.needlePt.copy(this.hit);
+      else if (hovered || tapped) e.needlePt.lerp(this.hit, Math.min(1, dt * 20));
+      e.needle += (want - e.needle) * Math.min(1, dt * (want > e.needle ? 10 : 4));
+      for (const m of e.mats) {
+        const mu = m.userData.uniforms as { uReveal: { value: number }; uNeedle: { value: THREE.Vector4 } };
+        mu.uReveal.value = e.ink;
+        mu.uNeedle.value.set(e.needlePt.x, e.needlePt.y, e.needlePt.z, e.needle);
+      }
+      if (hovered && e.ink < 1) ui = 2;
+      else if (focus && !e.started && ui === 0) ui = 1;
+    }
+    this.inkUi = ui;
   }
 
   // camere chiave dell'outro: Custode → volto → sguardo verso l'oculo

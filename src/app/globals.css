@@ -4,6 +4,8 @@
   --cenere: #696b6a;
   --avorio: #e6e0d4;
   --nichel: #a59c8b;
+  /* etichette e testi secondari: più chiari del nichel per restare leggibili sulla scena */
+  --label: #c6bcaa;
   --hero: 0;
   --progress: 0;
   --intro: 0;
@@ -135,10 +137,10 @@ main {
   position: absolute;
   bottom: 5vh;
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(230, 224, 212, 0.35);
+  color: rgba(230, 224, 212, 0.62);
   text-align: center;
   padding: 0 16px;
 }
@@ -150,9 +152,11 @@ main {
   color: var(--avorio);
   padding: 15px 26px;
   border-radius: 999px;
-  font: 400 11px/1 var(--font-sans);
-  letter-spacing: 0.26em;
+  font: 500 12px/1 var(--font-sans);
+  letter-spacing: 0.24em;
   text-transform: uppercase;
+  text-decoration: none;
+  display: inline-block;
   transition: background 0.5s var(--ease), color 0.5s var(--ease), border-color 0.5s var(--ease);
 }
 .btn:hover:not(:disabled) {
@@ -163,7 +167,16 @@ main {
   opacity: 0.3;
 }
 .btn--ghost {
-  border-color: rgba(230, 224, 212, 0.16);
+  border-color: rgba(230, 224, 212, 0.32);
+}
+.btn--solid {
+  background: var(--avorio);
+  color: var(--carbone);
+  border-color: var(--avorio);
+}
+.btn--solid:hover:not(:disabled) {
+  background: transparent;
+  color: var(--avorio);
 }
 
 /* ---------------------------------------------------------------- nav */
@@ -177,18 +190,19 @@ main {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   padding: 26px clamp(16px, 3.4vw, 48px);
-  font-size: 11px;
-  letter-spacing: 0.26em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
   opacity: var(--intro);
   mix-blend-mode: difference;
 }
 .nav__brand i {
   font-style: normal;
-  color: var(--nichel);
+  color: var(--label);
 }
 .nav__place {
-  color: var(--nichel);
+  color: var(--label);
 }
 .nav__sound {
   justify-self: end;
@@ -266,21 +280,24 @@ main {
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.32em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: var(--nichel);
+  color: var(--label);
   white-space: nowrap;
 }
 .hero__sub {
   position: absolute;
   left: clamp(16px, 4vw, 64px);
   bottom: 8vh;
-  max-width: 300px;
+  max-width: 340px;
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 400;
   line-height: 1.6;
-  color: rgba(230, 224, 212, 0.7);
+  color: rgba(230, 224, 212, 0.88);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 24px rgba(0, 0, 0, 0.6);
 }
 .hero__cue {
   position: absolute;
@@ -289,8 +306,9 @@ main {
   display: flex;
   align-items: center;
   gap: 14px;
-  font-size: 11px;
-  letter-spacing: 0.26em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
 }
 .hero__cue i {
@@ -324,6 +342,18 @@ main {
   z-index: 10;
   pointer-events: none;
 }
+/* velo scuro sotto le didascalie: il testo resta leggibile anche sulle zone illuminate */
+.captions::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48vh;
+  background: linear-gradient(to top, rgba(6, 7, 8, 0.62), rgba(6, 7, 8, 0.28) 45%, rgba(6, 7, 8, 0));
+  opacity: var(--hero);
+  pointer-events: none;
+}
 .cap {
   position: absolute;
   bottom: 12vh;
@@ -331,7 +361,7 @@ main {
   visibility: hidden;
   transition: visibility 0s linear 0.7s;
   will-change: transform;
-  text-shadow: 0 0 28px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 30px rgba(0, 0, 0, 0.7);
 }
 .cap.is-on {
   visibility: visible;
@@ -357,7 +387,8 @@ main {
 }
 .cap__index,
 .cap__body,
-.cap__meta {
+.cap__meta,
+.cap__action {
   opacity: 0;
   transform: translate3d(0, 14px, 0);
   transition: opacity 0.4s ease, transform 0.4s ease;
@@ -377,6 +408,12 @@ main {
   transform: none;
   transition: opacity 1.2s var(--ease) 0.65s, transform 1.4s var(--ease) 0.65s;
 }
+.cap.is-on .cap__action {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition: opacity 1.2s var(--ease) 0.9s, transform 1.4s var(--ease) 0.9s, background 0.5s var(--ease), color 0.5s var(--ease);
+}
 .cap--left {
   left: clamp(16px, 5vw, 80px);
 }
@@ -395,8 +432,8 @@ main {
 .cap__index {
   display: block;
   margin-bottom: 14px;
-  font: italic 300 15px/1 var(--font-display);
-  color: var(--nichel);
+  font: italic 400 18px/1 var(--font-display);
+  color: var(--label);
   letter-spacing: 0.1em;
 }
 .cap__title {
@@ -405,17 +442,19 @@ main {
   letter-spacing: -0.015em;
 }
 .cap__body {
-  margin: 18px 0 0;
-  font-size: 14px;
-  line-height: 1.65;
-  color: rgba(230, 224, 212, 0.78);
+  margin: 20px 0 0;
+  font-size: 16.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: rgba(236, 231, 222, 0.94);
 }
 .cap__meta {
-  margin: 14px 0 0;
-  font-size: 10.5px;
-  letter-spacing: 0.24em;
+  margin: 16px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--nichel);
+  color: var(--label);
 }
 .cap--end {
   bottom: 9vh;
@@ -423,6 +462,87 @@ main {
 .cap--end .cap__title {
   font-style: italic;
   font-size: clamp(3rem, 8vw, 7.5rem);
+}
+
+/* finale commerciale: al centro dell'oculo, dentro il cerchio d'inchiostro */
+.captions .cap--cta {
+  inset: 0;
+  margin: 0;
+  max-width: none;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.cap--cta .cap__title {
+  font-style: italic;
+  font-size: clamp(2.6rem, 6.6vw, 6.2rem);
+  max-width: 12ch;
+}
+.cap--cta .cap__body {
+  font: italic 400 clamp(1.25rem, 2.1vw, 1.75rem) / 1.3 var(--font-display);
+  letter-spacing: 0.01em;
+}
+.cap__action {
+  margin-top: 34px;
+  padding: 18px 32px;
+  text-shadow: none;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- invito a tatuare */
+.hint {
+  position: fixed;
+  left: 50%;
+  top: 84px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  transform: translate3d(-50%, -6px, 0);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--avorio);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s var(--ease), transform 0.8s var(--ease);
+}
+.hint::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff9a52;
+  box-shadow: 0 0 12px #ff8a3d;
+  animation: needle 1.6s ease-in-out infinite;
+}
+@keyframes needle {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+.pc-hint .hint {
+  opacity: 0.95;
+  transform: translate3d(-50%, 0, 0);
+}
+.hint__touch {
+  display: none;
+}
+@media (pointer: coarse) {
+  .hint__fine {
+    display: none;
+  }
+  .hint__touch {
+    display: inline;
+  }
 }
 
 /* ---------------------------------------------------------------- misuratore */
@@ -477,6 +597,28 @@ main {
   transform: scale(2.1);
   background: #fff;
 }
+/* sopra il marmo il cursore diventa la punta dell'ago */
+.cursor b {
+  position: absolute;
+  left: 20px;
+  top: -5px;
+  font: 500 10px/1 var(--font-sans);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #fff;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.4s var(--ease), transform 0.4s var(--ease);
+}
+.pc-inking .cursor:not(.is-link) i {
+  transform: scale(0.3);
+  background: #fff;
+}
+.pc-inking .cursor:not(.is-link) b {
+  opacity: 1;
+  transform: none;
+}
 @media (pointer: coarse) {
   .cursor {
     display: none;
@@ -515,23 +657,22 @@ main {
     font-size: clamp(2.6rem, 13vw, 4rem);
   }
   .cap__body {
-    font-size: 13.5px;
-    max-width: 34ch;
+    font-size: 15px;
+    max-width: 36ch;
+  }
+  .cap--cta .cap__title {
+    font-size: clamp(2.4rem, 11vw, 3.6rem);
+  }
+  .hint {
+    top: 72px;
   }
   .cap--center .cap__body {
     margin-left: auto;
     margin-right: auto;
   }
   .captions::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 46vh;
-    background: linear-gradient(to top, rgba(6, 7, 8, 0.78), rgba(6, 7, 8, 0));
-    opacity: var(--hero);
-    pointer-events: none;
+    height: 52vh;
+    background: linear-gradient(to top, rgba(6, 7, 8, 0.8), rgba(6, 7, 8, 0));
   }
   .hero__kicker {
     top: 13vh;
@@ -552,6 +693,7 @@ main {
 
 @media (prefers-reduced-motion: reduce) {
   .hero__cue i::after,
+  .hint::before,
   .nav__sound .eq i {
     animation: none !important;
   }

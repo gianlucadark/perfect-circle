@@ -34,13 +34,18 @@ export interface InkStoneOptions {
   origin?: [number, number]; // origine della propagazione (uv)
   dressY?: number; // veste d'inchiostro liquido sotto questa quota (spazio oggetto)
   glow?: THREE.ColorRepresentation; // colore dell'"ago" che traccia l'inchiostro
+  span?: number; // misura di riferimento (spazio oggetto) per la propagazione da un punto della superficie
 }
 
 /**
  * Marmo procedurale (scansioni senza texture) con tatuaggio, su MeshStandardMaterial.
  * - uTattoo: maschera R8 (bianco = inchiostro), proiezione cilindrica (torsi) o planare (busti, statue).
  * - uReveal: l'inchiostro si propaga dall'origine con bordo organico; il fronte brilla come un ago caldo.
+ *   Con uInkPt.w = 1 l'origine è un punto della superficie (spazio oggetto): quello toccato dal cursore.
+ * - uNeedle: punta luminosa che segue il cursore sul marmo (xyz spazio oggetto, w intensità).
  * - uPour / uDressY: inchiostro liquido lucido che cola dall'alto o veste la statua dal basso.
+ * - Marmo: venature primarie e secondarie, pori e grana, rugosità variabile; l'inchiostro è inciso
+ *   (bump in spazio schermo), così le linee del tatuaggio hanno un bordo che prende la luce.
  */
 export function makeInkStoneMaterial(o: InkStoneOptions) {
   const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, envMapIntensity: o.envIntensity ?? 0.6 });
@@ -65,6 +70,9 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
     uAspect: { value: new THREE.Vector2(r ? r.w / Math.max(r.w, r.h) : 1.6, r ? r.h / Math.max(r.w, r.h) : 1) },
     uDressY: { value: o.dressY ?? -1 },
     uGlowCol: { value: new THREE.Color(o.glow ?? 0xff8a3d) },
+    uInkPt: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uNeedle: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uSpan: { value: o.span ?? 1 },
     uTime: shared.uTime,
   };
   m.userData.uniforms = uniforms;
@@ -81,14 +89,26 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
 varying vec3 vObj;
 varying vec3 vObjN;
 uniform sampler2D uTattoo;
-uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uProj, uProjYaw, uDressY;
+uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uProj, uProjYaw, uDressY, uSpan;
 uniform vec3 uInkColor, uGlowCol;
 uniform vec2 uYRange, uOrigin, uAspect;
-uniform vec4 uRect;
+uniform vec4 uRect, uInkPt, uNeedle;
 float pcInk;
 float pcLiquid;
 float pcGlow;
+float pcRough;
+float pcHeight;
 ${NOISE_GLSL}
+// bump su superfici senza UV (Mikkelsen), derivate della quota in spazio schermo
+vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
+  vec3 sx = normalize(dFdx(pos));
+  vec3 sy = normalize(dFdy(pos));
+  vec3 r1 = cross(sy, n);
+  vec3 r2 = cross(n, sx);
+  float det = dot(sx, r1) * fd;
+  vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
+  return normalize(abs(det) * n - grad);
+}
 `,
       )
       .replace(
@@ -114,6 +134,8 @@ ${NOISE_GLSL}
     gx = dFdx(tuv); gy = dFdy(tuv);
     dist = length((tuv - uOrigin) * uAspect) * 1.25;
   }
+  // propagazione dal punto toccato: distanza misurata sulla superficie stessa (spazio oggetto)
+  if (uInkPt.w > 0.5) dist = length(vObj - uInkPt.xyz) / uSpan;
   float ink = textureGrad(uTattoo, tuv, gx, gy).r;
   float bleed = textureGrad(uTattoo, tuv, gx * 9.0, gy * 9.0).r;
   float n = pcNoise(vObj.xy * 38.0 + vObj.z * 21.0) * 0.5 + pcNoise(vObj.zy * 95.0) * 0.25;
@@ -122,16 +144,40 @@ ${NOISE_GLSL}
   pcInk = clamp(ink * 0.96 + bleed * 0.1, 0.0, 1.0) * mask;
   // fronte che avanza: l'ago scalda la linea appena tracciata
   pcGlow = ink * smoothstep(0.0, 0.02, rv) * (1.0 - smoothstep(0.02, 0.2, rv)) * uHasTattoo * wproj;
+  // la punta dell'ago segue il cursore sul marmo
+  float nd = length(vObj - uNeedle.xyz) / uSpan;
+  pcGlow = max(pcGlow, uNeedle.w * (exp(-nd * nd * 40000.0) * 0.35 + exp(-nd * nd * 4000.0) * 0.02));
   // marmo procedurale
+  // dettaglio fine attenuato quando la superficie è lontana (niente sfarfallio)
+  float aa = 1.0 - smoothstep(0.0015, 0.006, length(fwidth(vObj)));
   vec3 q = vObj * 2.2;
   float w1 = pcNoise(q.xy * 1.7 + q.z) + 0.5 * pcNoise(q.zy * 3.9 - q.x) + 0.25 * pcNoise(q.xz * 8.1);
   float vein = pow(1.0 - abs(sin((q.x * 0.8 + q.y * 1.6 + q.z * 0.5) * 3.0 + w1 * 5.0)), 9.0);
+  // venature secondarie: capillari sottili e spezzati, a un'altra inclinazione
+  float w2 = pcNoise(q.zx * 5.3 + q.y * 1.9) + 0.5 * pcNoise(q.xy * 11.0 - q.z * 3.0);
+  float vein2 = pow(1.0 - abs(sin((q.y * 2.1 - q.x * 1.3 + q.z * 0.9) * 6.0 + w2 * 6.5 + w1 * 2.0)), 28.0);
+  vein2 *= smoothstep(0.35, 0.75, pcNoise(q.xy * 2.6 + 7.0));
   float cloud = pcNoise(q.xy * 0.9 + 3.0) * 0.5 + pcNoise(q.zy * 2.3) * 0.5;
-  vec3 ivory = vec3(0.56, 0.53, 0.48) * (0.9 + 0.14 * cloud);
-  diffuseColor.rgb = mix(ivory, vec3(0.24, 0.23, 0.22), vein * 0.6);
+  // micro-imperfezioni: grana cristallina e piccoli pori (calcolate solo da vicino)
+  float grain = 0.5;
+  float pits = 0.0;
+  if (aa > 0.0) {
+    grain = pcNoise(vObj.xy * 410.0 + vObj.z * 290.0) * 0.6 + pcNoise(vObj.zy * 170.0 - vObj.x * 120.0) * 0.4;
+    pits = smoothstep(0.93, 0.995, pcNoise(vObj.zy * 230.0 + vObj.x * 160.0)) * aa;
+  }
+  vec3 ivory = vec3(0.585, 0.56, 0.52) * (0.88 + 0.16 * cloud) * (1.0 + (grain - 0.5) * 0.07 * aa);
+  // in profondità il marmo è leggermente più caldo e traslucido
+  ivory = mix(ivory, vec3(0.6, 0.53, 0.45), (1.0 - cloud) * 0.18);
+  diffuseColor.rgb = mix(ivory, vec3(0.27, 0.27, 0.285), vein * 0.55);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.4, 0.4, 0.42), vein2 * 0.4);
+  diffuseColor.rgb *= 1.0 - pits * 0.07;
   float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-  vec3 darkStone = mix(vec3(0.008, 0.008, 0.009), vec3(0.075, 0.07, 0.066), pow(lum, 2.6) * 1.6) + vec3(0.05, 0.045, 0.04) * vein;
+  vec3 darkStone = mix(vec3(0.008, 0.008, 0.009), vec3(0.075, 0.07, 0.066), pow(lum, 2.6) * 1.6) + vec3(0.05, 0.045, 0.04) * vein + vec3(0.035, 0.033, 0.03) * vein2;
   diffuseColor.rgb = mix(diffuseColor.rgb, darkStone, uDark);
+  // lucidatura non uniforme: le venature e le zone lisce riflettono di più, i pori di meno
+  pcRough = mix(mix(0.5, 0.3, cloud), mix(0.38, 0.22, cloud), uDark) - vein * 0.08 + pits * 0.25 + (grain - 0.5) * 0.06 * aa;
+  // l'inchiostro è inciso: la linea scende sotto la superficie, il bordo prende la luce
+  pcHeight = -pcInk * 0.55 - pits * 0.12 + (grain - 0.5) * 0.03 * aa;
   diffuseColor.rgb = mix(diffuseColor.rgb, uInkColor, pcInk);
   // colata dalla sommità
   float ang = atan(vObj.x, vObj.z) / 6.2831853 + 0.5;
@@ -149,13 +195,19 @@ ${NOISE_GLSL}
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.003, 0.0032, 0.004), pcLiquid);
   pcGlow *= 1.0 - pcLiquid;
+  pcHeight *= 1.0 - pcLiquid;
 }`,
       )
       .replace(
         "#include <roughnessmap_fragment>",
         /* glsl */ `#include <roughnessmap_fragment>
-roughnessFactor = mix(mix(0.6, 0.34, uDark), uInkRough, pcInk);
+roughnessFactor = mix(clamp(pcRough, 0.14, 0.75), uInkRough, pcInk);
 roughnessFactor = mix(roughnessFactor, 0.06, pcLiquid);`,
+      )
+      .replace(
+        "#include <normal_fragment_maps>",
+        /* glsl */ `#include <normal_fragment_maps>
+normal = pcPerturb(-vViewPosition, normal, vec2(dFdx(pcHeight), dFdy(pcHeight)), faceDirection);`,
       )
       .replace(
         "#include <metalnessmap_fragment>",
@@ -168,7 +220,7 @@ metalnessFactor = mix(metalnessFactor, uInkMetal, pcInk);`,
 totalEmissiveRadiance += uGlowCol * pcGlow * 11.0;`,
       );
   };
-  m.customProgramCacheKey = () => "inkstone2";
+  m.customProgramCacheKey = () => "inkstone3";
   return m;
 }
 

@@ -151,6 +151,19 @@ export const OUTRO_CAPTION = {
   body: "E ricomincia. Ogni linea comincia da un cerchio.",
 };
 
+/** ultimo momento del giro, dentro l'oculo: l'invito a prenotare */
+export const CTA_CAPTION = {
+  title: "Ogni corpo è un’opera.",
+  body: "La prossima potrebbe essere la tua.",
+  action: "Prenota una consulenza",
+  // TODO: sostituire con il canale di prenotazione reale dello studio (WhatsApp, modulo, Instagram, email)
+  href: "#prenota",
+};
+
+/** finestre dell'outro (frazione 0..1) in cui compaiono le due didascalie finali */
+export const OUTRO_CAP_WINDOW: [number, number] = [0.04, 0.34];
+export const CTA_WINDOW: [number, number] = [0.4, 0.8];
+
 /** lunghezze in schermate di scroll */
 export const HERO_LEN = 2.0;
 export const STEP_LEN = 1.0;

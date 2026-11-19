@@ -6,7 +6,8 @@ import { portalFragment, portalVertex } from "./portalShader";
 import { CompositeShader, FinalShader } from "./post";
 import { Gallery, smoothstep, type StatueMeta, type TorsoMeta } from "./gallery";
 import { shared } from "./materials";
-import { GALLERY_LEN, HERO_LEN, OUTRO_LEN, STATIONS, STEP_LEN, TOTAL_LEN } from "./stations";
+import { CTA_WINDOW, GALLERY_LEN, HERO_LEN, OUTRO_CAP_WINDOW, OUTRO_LEN, STATIONS, STEP_LEN, TOTAL_LEN } from "./stations";
+import { OUTRO_A } from "./gallery";
 import { InkDrone } from "./audio";
 import { InfiniteScroll } from "./scroll";
 import { AdaptiveQuality } from "./quality";
@@ -52,6 +53,8 @@ export class Engine {
   private lastHero = "";
   private lastProgress = "";
   private lastIntro = "";
+  private lastInkUi = -1;
+  private tapStart = { x: 0, y: 0, t: 0 };
   progress = 0;
   exposureMul = 1;
 
@@ -107,7 +110,11 @@ export class Engine {
     this.composer.addPass(this.final);
     this.final.uniforms.uFade.value = 1;
 
+    this.gallery.coarse = window.matchMedia("(pointer: coarse)").matches;
     window.addEventListener("pointermove", this.onPointer, { passive: true });
+    window.addEventListener("pointerdown", this.onDown, { passive: true });
+    window.addEventListener("pointerup", this.onUp, { passive: true });
+    document.documentElement.addEventListener("pointerleave", this.onLeave);
     if (process.env.NODE_ENV !== "production") (window as unknown as { __pc: Engine }).__pc = this;
   }
 
@@ -124,6 +131,21 @@ export class Engine {
   private onPointer = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
     this.mouseTarget.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1));
+    this.gallery.setPointer(this.mouseTarget.x, this.mouseTarget.y);
+  };
+
+  private onLeave = () => this.gallery.clearPointer();
+
+  private onDown = (e: PointerEvent) => {
+    this.tapStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+  };
+
+  /** sugli schermi touch un tocco breve e fermo sulla statua fa partire il disegno da lì */
+  private onUp = (e: PointerEvent) => {
+    if (e.pointerType !== "touch" || (e.target as HTMLElement)?.closest?.("button, a")) return;
+    const s = this.tapStart;
+    if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 12 || performance.now() - s.t > 450) return;
+    this.gallery.tap((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1));
   };
 
   async load(cb: EngineCallbacks, fontFamily: string) {
@@ -264,6 +286,8 @@ export class Engine {
     } else u.uDist.value = 0;
 
     const push = outro ? 0 : 1 - smoothstep(0.25, 1.0, h);
+    // si tatua solo a galleria piena: non durante l'attraversamento né nell'ascesa
+    this.gallery.interactive = mixG === 1 && (!outro || o < OUTRO_A * 0.5);
     this.gallery.update(this.time, dt, g, push, this.mouse, outro ? o : -1);
 
     if (renderGallery) {
@@ -299,7 +323,8 @@ export class Engine {
     let active = "";
     const sf = this.gallery.stationFloat;
     if (outro) {
-      if (o > 0.04 && o < 0.4) active = "outro";
+      if (o > OUTRO_CAP_WINDOW[0] && o < OUTRO_CAP_WINDOW[1]) active = "outro";
+      else if (o > CTA_WINDOW[0] && o < CTA_WINDOW[1]) active = "cta";
     } else if (mixG === 1) {
       const r = Math.round(sf);
       if (Math.abs(sf - r) < 0.3) active = String(r);
@@ -310,8 +335,16 @@ export class Engine {
     }
     for (const el of this.captions) {
       if (el.dataset.station !== active) continue;
-      const d = active === "outro" ? (o - 0.22) * 3 : sf - Number(active);
+      const mid = (w: [number, number]) => (w[0] + w[1]) / 2;
+      const d = active === "outro" ? (o - mid(OUTRO_CAP_WINDOW)) * 3 : active === "cta" ? (o - mid(CTA_WINDOW)) * 1.2 : sf - Number(active);
       el.style.transform = `translate3d(0, ${(d * -46).toFixed(1)}px, 0)`;
+    }
+    const inkUi = this.gallery.inkUi;
+    if (inkUi !== this.lastInkUi) {
+      this.lastInkUi = inkUi;
+      const cl = document.documentElement.classList;
+      cl.toggle("pc-hint", inkUi === 1);
+      cl.toggle("pc-inking", inkUi === 2);
     }
 
     const tension = outro ? smoothstep(0.4, 0.72, o) * (1 - smoothstep(0.8, 1, o)) : smoothstep(0.2, 0.95, h) * (1 - smoothstep(0.98, 1, h));
@@ -325,6 +358,10 @@ export class Engine {
   dispose() {
     this.disposed = true;
     window.removeEventListener("pointermove", this.onPointer);
+    window.removeEventListener("pointerdown", this.onDown);
+    window.removeEventListener("pointerup", this.onUp);
+    document.documentElement.removeEventListener("pointerleave", this.onLeave);
+    document.documentElement.classList.remove("pc-hint", "pc-inking");
     this.scroller.dispose();
     this.composer.dispose();
     this.composite.dispose();

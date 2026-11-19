@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Engine } from "./three/engine/Engine";
-import { OUTRO_CAPTION, STATIONS } from "./three/engine/stations";
+import { CTA_CAPTION, OUTRO_CAPTION, STATIONS } from "./three/engine/stations";
 
 const Experience = dynamic(() => import("./three/Experience"), { ssr: false });
 
@@ -181,7 +181,21 @@ export default function InkGallery() {
           </h2>
           <p className="cap__body">{OUTRO_CAPTION.body}</p>
         </article>
+        <article data-station="cta" className="cap cap--cta">
+          <h2 className="cap__title" aria-label={CTA_CAPTION.title}>
+            <Split text={CTA_CAPTION.title} />
+          </h2>
+          <p className="cap__body">{CTA_CAPTION.body}</p>
+          <a className="btn btn--solid cap__action" href={CTA_CAPTION.href}>
+            {CTA_CAPTION.action}
+          </a>
+        </article>
       </div>
+
+      <p className="hint" aria-hidden>
+        <span className="hint__fine">Sfiora il marmo: l&apos;inchiostro segue la tua mano</span>
+        <span className="hint__touch">Tocca il marmo per tatuarlo</span>
+      </p>
 
       <div className="meter" aria-hidden>
         <svg viewBox="0 0 40 40">
@@ -192,6 +206,7 @@ export default function InkGallery() {
 
       <div className="cursor" ref={cursorRef} aria-hidden>
         <i />
+        <b>Inchiostro</b>
       </div>
     </>
   );
