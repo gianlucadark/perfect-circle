@@ -34,24 +34,28 @@ export const STATIONS: Station[] = [
     align: "center",
   },
   {
-    id: "costanza",
-    pos: [-0.62, 1.74, -3.75],
-    look: [-1.9, 1.62, -5.0],
-    lift: 0.12,
+    id: "notte",
+    pos: [-0.75, 1.75, -2.1],
+    look: [-2.38, 1.12, -5.46],
+    mpos: [-0.85, 1.95, -1.25],
+    mlook: [-3.25, 1.2, -5.0],
+    lift: 0.1,
     index: "I",
-    title: "Costanza",
-    body: "Le fasi della luna lungo le clavicole, un cerchio sullo sterno, un filo sottile al collo. Il gioiello diventa pelle.",
-    meta: "Fine line · ornamentale",
+    title: "La Notte",
+    body: "Dorme con la luna nel diadema. Sulla coscia le è salito il cielo: una falce con la stella e le fasi in fila lungo la linea del femore.",
+    meta: "Fine line · lunare",
     align: "right",
   },
   {
-    id: "antinoo",
-    pos: [0.62, 1.62, -7.65],
-    look: [1.9, 1.38, -9.0],
-    lift: 0.1,
+    id: "apollo",
+    pos: [0.15, 1.5, -6.55],
+    look: [1.98, 1.42, -9.68],
+    mpos: [0.25, 1.55, -6.2],
+    mlook: [2.45, 1.4, -9.5],
+    lift: 0.06,
     index: "II",
-    title: "Antinoo",
-    body: "Un sole nero sul petto, la frase scritta nell'anello. Il blackwork come un'armatura.",
+    title: "Apollo",
+    body: "Il dio del sole porta il suo sole sul petto: nero, con la frase dello studio scritta nell'anello. Sul braccio, raggi pieni come un'armatura.",
     meta: "Blackwork · geometria sacra",
     align: "left",
   },
@@ -134,15 +138,31 @@ export const STATIONS: Station[] = [
   },
   {
     id: "custode",
-    pos: [0, 1.8, -61.1],
-    look: [0, 2.25, -66],
-    mpos: [0, 1.85, -62.0],
+    // dal basso, un poco a destra: la dea sovrasta chi arriva, la didascalia sta accanto e non sulle gambe
+    pos: [0.45, 1.5, -62.0],
+    look: [0.82, 2.12, -66],
+    mpos: [0, 1.75, -61.7],
+    mlook: [0, 2.15, -66],
     lift: 0.04,
     index: "VIII",
     title: "La Custode",
-    body: "Regina del regno d'inchiostro, con la pelle di chi tatua: rose sulle spalle, una ghirlanda di rose e peonie che le cinge la vita.",
-    meta: "Black & grey · realismo · rose",
-    align: "center",
+    body: "La dea dell'inchiostro ha la pelle di chi tatua: una manica di rose e peonie, un mandala sul dorso della mano. Nella destra non tiene una mela, ma una goccia d'inchiostro.",
+    meta: "Black & grey · manica · realismo",
+    align: "right",
+  },
+  {
+    // giro attorno alla dea dal lato della manica, fino al dorso
+    id: "segno",
+    pos: [2.72, 2.45, -67.62],
+    look: [-0.12, 2.3, -66.69],
+    mpos: [3.05, 2.45, -67.8],
+    mlook: [0.12, 2.3, -66.25],
+    via: [{ pos: [3.38, 2.05, -64.6], look: [0.1, 2.1, -66] }],
+    index: "IX",
+    title: "Il segno",
+    body: "Lungo la spina, una colonna di perle e di lune. Sulla nuca porta il segno dello studio: un cerchio perfetto, senza inizio né fine.",
+    meta: "Ornamentale · dotwork",
+    align: "right",
   },
 ];
 
@@ -161,7 +181,7 @@ export const CTA_CAPTION = {
 };
 
 /** finestre dell'outro (frazione 0..1) in cui compaiono le due didascalie finali */
-export const OUTRO_CAP_WINDOW: [number, number] = [0.04, 0.34];
+export const OUTRO_CAP_WINDOW: [number, number] = [0.1, 0.36];
 export const CTA_WINDOW: [number, number] = [0.4, 0.8];
 
 /** lunghezze in schermate di scroll */

@@ -1,196 +1,321 @@
-import { makeTorsoPen, type TorsoFrame, type TorsoPen } from "./torsoTattoos";
-import type { Ctx } from "./tattoo";
+/**
+ * La Custode: la Venere con la mela di Thorvaldsen come Ritah, la tatuatrice dello studio, dea dell'inchiostro.
+ * Ha le braccia, quindi porta i tatuaggi di chi tatua: una manica intera sul braccio sinistro (rose e
+ * peonie su fondo di fumo nero), un mandala sul dorso della mano, un pezzo floreale sul fianco destro, una
+ * colonna ornamentale lungo la spina e, alla base della nuca, il segno dello studio: un cerchio perfetto.
+ * Nella mano destra non tiene una mela ma una goccia d'inchiostro liquido.
+ * Seno, pube e volto restano puliti. Disegni procedurali originali: non sono lavori dello studio.
+ *
+ * Coordinate: spazio oggetto del modello esportato a misura umana (1,80 m con la base; x verso la sinistra
+ * della statua, y in alto, fronte verso +z). Assi di braccia e bacino misurati sulle sezioni della mesh;
+ * carte e quote verificate con ?inkgrid=charts e la camera d'ispezione.
+ */
+import { erase, ink, line, diamond, teardrop, crescent, arcStroke, moon, type ChartSpec, type Spec } from "./statueTattoos";
+import { leafShaded, peonyFull, rose, withLine } from "./inkArt";
+import { bud, lotusPetal, softDisk, spline, stippleCurve } from "./torsoTattoos";
+import { circle, dot, type Ctx, type Rng } from "./tattoo";
 
-/** fascia del corpo della Custode su cui si calcola l'asse del tronco (frazioni dell'altezza) */
-export const CUSTODE_FIT: [number, number] = [0.56, 0.78];
-/** quote (spazio oggetto, m) della carta del tronco: dai fianchi, sotto la veste, alla base del collo */
-export const CUSTODE_Y: [number, number] = [0.95, 1.85];
+type V3 = [number, number, number];
+type Design = NonNullable<ChartSpec["draw"]>;
 
-/** griglia di lettura (?inkgrid): x = arco dal centro del petto, y = quota assoluta; etichette in cm */
-function wrapGrid({ c, C }: TorsoPen, y0: number, y1: number) {
-  for (let x = 0; x <= C / 2; x += 0.025) {
-    for (const s of x ? [-1, 1] : [1]) {
-      const cm = Math.round(x * 1000) / 10;
-      c.lineWidth = cm === 0 ? 0.004 : cm % 10 === 0 ? 0.0028 : cm % 5 === 0 ? 0.0014 : 0.0006;
-      c.beginPath();
-      c.moveTo(s * x, y0);
-      c.lineTo(s * x, y1);
-      c.stroke();
-    }
-  }
-  for (let y = Math.ceil(y0 * 40) / 40; y <= y1; y += 0.025) {
-    const cm = Math.round(y * 1000) / 10;
-    c.lineWidth = cm % 10 === 0 ? 0.0028 : cm % 5 === 0 ? 0.0014 : 0.0006;
-    c.beginPath();
-    c.moveTo(-C / 2, y);
-    c.lineTo(C / 2, y);
-    c.stroke();
-  }
-  const m = c.getTransform();
-  c.save();
-  c.setTransform(1, 0, 0, 1, 0, 0);
-  c.font = `600 ${Math.round(m.a * 0.013)}px monospace`;
-  for (let y = Math.ceil(y0 * 20) / 20; y < y1; y += 0.05) {
-    for (let x = -Math.floor(C / 2 / 0.05) * 0.05; x <= C / 2; x += 0.05) {
-      c.fillText(`${Math.round(x * 100)}|${Math.round(y * 100)}`, m.e + (x + 0.003) * m.a, m.f + (y + 0.004) * m.d);
-    }
-  }
-  c.restore();
-}
+/** messa in scena: scala d'esposizione, rotazione (il braccio tatuato verso chi arriva), punti chiave */
+export const CUSTODE = {
+  id: "KMS6004",
+  height: 1.8,
+  scale: 1.45,
+  yaw: -0.35,
+  /** centro della testa e base della nuca (spazio oggetto) */
+  head: [0.107, 1.7, 0.09] as V3,
+  nape: [0.055, 1.53, -0.125] as V3,
+  /** la "mela": centro e raggio */
+  apple: [-0.053, 1.405, 0.188, 0.0445] as const,
+};
 
-export function makeCustodeWrap(frame: TorsoFrame, scale: number, grid = false): HTMLCanvasElement {
-  const [y0, y1] = CUSTODE_Y;
-  const pen = makeTorsoPen({ ...frame, H: y1 - y0 }, Math.round(3072 * scale));
-  // il disegno lavora in quote assolute del modello; i bordi della carta restano puliti
-  pen.c.translate(0, -y0);
-  if (grid) wrapGrid(pen, y0 + 0.002, y1 - 0.002);
-  else {
-    pen.c.save();
-    pen.c.beginPath();
-    pen.c.rect(-pen.C, y0 + 0.01, pen.C * 2, y1 - y0 - 0.02);
-    pen.c.clip();
-    drawGarden(pen.c);
-    pen.c.restore();
-  }
-  return pen.canvas;
-}
+const [AX, AY, AZ, AR] = CUSTODE.apple;
 
-const pigment = "#fff";
-const marble = "#000";
-
-export const CUSTODE_SLEEVE = /* glsl */ `
-float surfaceInk(vec3 p) {
-  float medial = p.x + .13 + .43 * (p.y - 1.53) - .27 * (p.z - .05);
-  float back = -.018 - .45 * (p.y - 1.49) - p.z;
-  float crest = p.y - 1.642 + .69 * (p.x + .2) - .23 * p.z;
-  float edge = max(max(medial, back), max(crest, 1.393 - p.y));
-  float aa = max(fwidth(edge), .00045);
-  float block = 1.0 - smoothstep(-aa, aa, edge);
-  float slit = abs(crest + .021) - .0038;
-  return block * smoothstep(-max(fwidth(slit), .00045), max(fwidth(slit), .00045), slit);
+/** inchiostro liquido: la mela tra le dita */
+export const CUSTODE_LIQUID = /* glsl */ `
+float liquidMask(vec3 p, vec3 n) {
+  float d = length(p - vec3(${AX}, ${AY}, ${AZ}));
+  // le dita stanno appena fuori dalla sfera: restano marmo
+  return 1.0 - smoothstep(${(AR + 0.002).toFixed(4)}, ${(AR + 0.0065).toFixed(4)}, d);
 }`;
 
-function shape(ctx: Ctx, path: string, fill = pigment) {
-  ctx.fillStyle = fill;
-  ctx.fill(new Path2D(path));
+/** peso dei contorni: realismo, ma con abbastanza linea da leggersi da lontano */
+const REAL = 0.5;
+const LW = 0.0019;
+
+/** sulle carte che fanno il giro completo (braccio) un motivo vicino alla cucitura si disegna anche dall'altra parte */
+function seam(W: number, u: number, r: number, draw: (du: number) => void) {
+  draw(0);
+  if (u - r < -W / 2) draw(W);
+  if (u + r > W / 2) draw(-W);
 }
 
-function stamp(ctx: Ctx, x: number, y: number, width: number, height: number, angle: number, draw: () => void) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-  ctx.scale(width, height);
-  draw();
-  ctx.restore();
-}
-
-function bloom(ctx: Ctx) {
-  shape(ctx, "M-42 -10 Q-52 -23 -43 -34 Q-36 -36 -31 -35 Q-28 -48 -13 -46 L-4 -43 Q8 -51 21 -42 L28 -35 Q46 -36 47 -20 L44 -10 Q55 3 45 17 L36 22 Q35 40 18 42 L8 41 Q-6 53 -20 44 L-26 38 Q-43 37 -45 22 L-43 13 Q-56 1 -42 -10Z");
-  for (const petal of [
-    "M-43 -28 Q-34 -37 -25 -29 Q-15 -23 -8 -26 Q-22 -16 -32 -13 Q-37 -16 -43 -28Z",
-    "M-27 -35 Q-24 -46 -12 -42 Q-3 -36 7 -36 Q0 -31 -10 -31 Q-17 -29 -27 -35Z",
-    "M-2 -41 Q10 -47 21 -37 Q25 -32 26 -26 Q16 -28 7 -26 Q11 -34 -2 -41Z",
-    "M29 -31 Q47 -32 43 -15 Q39 -1 26 6 Q30 -5 26 -17 Q30 -22 29 -31Z",
-    "M46 -3 Q54 13 36 19 Q21 23 12 32 Q15 19 28 12 Q40 7 46 -3Z",
-    "M32 23 Q32 39 14 38 Q3 36 -7 41 Q-3 33 9 30 Q23 29 32 23Z",
-    "M3 36 Q-6 50 -18 41 Q-28 32 -30 24 Q-19 29 -11 28 Q-3 29 3 36Z",
-    "M-37 13 Q-35 25 -25 33 Q-44 33 -41 17 Q-42 10 -47 5 Q-42 6 -37 13Z",
-    "M-43 -7 Q-32 -12 -26 -18 Q-25 -4 -17 4 Q-27 4 -34 10 Q-44 6 -43 -7Z",
-    "M-22 -22 Q-7 -22 0 -29 Q13 -34 21 -24 Q10 -26 2 -18 Q-9 -21 -19 -13Z",
-    "M21 -20 Q30 -6 19 7 Q11 16 0 18 Q1 9 11 4 Q22 -3 21 -20Z",
-    "M-31 12 Q-21 2 -11 8 Q-3 15 -6 24 Q-21 26 -31 12Z",
-    "M-1 22 Q10 18 17 13 Q8 23 9 28 Q1 31 -4 32Z",
-    "M-17 -11 Q-9 -19 0 -15 Q7 -14 11 -17 Q8 -8 -3 -7 Q-11 -6 -13 -1Z",
-    "M15 -15 Q20 -1 7 3 Q0 7 -1 12 Q-5 4 1 -1 Q13 -4 15 -15Z",
-    "M-10 -2 Q-5 -6 2 -5 Q-5 -2 -6 4Z",
-  ]) shape(ctx, petal, marble);
-  for (const cut of ["M-40 -29 Q-34 -22 -32 -17 Q-37 -21 -40 -29Z", "M40 -24 Q41 -14 33 -7 Q38 -15 40 -24Z", "M-25 13 Q-17 16 -12 22 Q-20 19 -25 13Z", "M17 34 Q24 31 28 27 Q25 33 17 34Z"]) shape(ctx, cut);
-  for (const [baseX, baseY, angle, size] of [[-32,-14,2.12,1], [27,2,1.08,.78], [-6,24,2.33,.85], [10,32,.29,.86], [-10,-31,-2.73,.74]]) {
-    stamp(ctx, baseX, baseY, size, size, angle, () => {
-      shape(ctx, "M0 0 Q5 2 12 .4 Q6 3.5 0 2Z M1 3.5 Q6 5 10 4.5 Q5 6.7 1 5Z M2 7 L7 8 L2 8.3Z");
-    });
+/**
+ * Fondo nero continuo della manica: una trama fitta di sfumature morbide che si sommano fino al nero pieno,
+ * con un respiro irregolare (mai un tubo uniforme). `dens(u, v)` (0..1) dice quanto nero vuole ogni punto:
+ * dove scende a zero la manica si apre o finisce. I bordi si sciolgono in puntinato.
+ */
+function blackGround(c: Ctx, rng: Rng, u0: number, u1: number, v0: number, v1: number, dens: (u: number, v: number) => number) {
+  const step = 0.016;
+  for (let v = v0; v <= v1; v += step) {
+    for (let u = u0; u <= u1; u += step) {
+      const x = u + (rng() - 0.5) * step;
+      const y = v + (rng() - 0.5) * step;
+      const d = dens(x, y);
+      if (d <= 0.02) continue;
+      softDisk(c, x, y, step * 0.5, step * (1.5 + rng() * 0.6), Math.min(1, d) * (0.55 + rng() * 0.25));
+    }
+  }
+  // pepe dell'ago dove il nero si dirada
+  const n = Math.round(((u1 - u0) * (v1 - v0)) / 0.0000032);
+  for (let i = 0; i < n; i++) {
+    const x = u0 + rng() * (u1 - u0);
+    const y = v0 + rng() * (v1 - v0);
+    const d = dens(x, y);
+    if (d <= 0.04 || d >= 0.75 || rng() > d * 1.3) continue;
+    dot(c, x, y, 0.00055 * (0.6 + rng() * 0.9));
   }
 }
 
-function leaf(ctx: Ctx, x: number, y: number, length: number, angle: number, flip = 1) {
-  stamp(ctx, x, y, length, length * flip, angle, () => {
-    shape(ctx, "M0 0 Q.11 .18 .33 .22 L.29 .17 L.57 .22 L.53 .16 L.76 .15 L.72 .1 Q.9 .09 1 0 Q.84 0 .68 -.11 L.69 -.06 L.45 -.17 L.47 -.11 Q.19 -.21 0 0Z");
-    shape(ctx, "M.07 .01 Q.39 .11 .87 .025 Q.42 .075 .07 .01Z M.37 .075 L.51 .16 L.42 .075Z M.53 .071 L.64 -.028 L.56 .071Z", marble);
-  });
-}
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
-function roseAt(ctx: Ctx, x: number, y: number, radius: number, angle: number) {
-  stamp(ctx, x, y, radius / 50, radius / -50, angle, () => bloom(ctx));
-}
+// ------------------------------------------------------------------ manica: avambraccio
+/**
+ * Avambraccio sinistro (R 3,7 cm, giro completo): u = 0 verso chi guarda dalla sosta, +u verso il lato
+ * esterno, ±0,116 il retro; v = 0 a metà avambraccio, polso a −0,087, gomito a +0,186.
+ * Una rosa grande davanti, una piccola sul lato esterno, una peonia sul retro, foglie che scendono
+ * verso il polso e un bracciale ornamentale che chiude la manica.
+ */
+const forearm: Design = (c, rng, _f, _p, { rect }) =>
+  withLine(REAL, () => {
+    const W = rect.w;
+    // nero pieno dal gomito a due dita dal polso, dove si scioglie verso il bracciale
+    blackGround(c, rng, -W / 2 - 0.02, W / 2 + 0.02, -0.06, 0.25, (_u, v) => smooth(-0.052, -0.012, v) * 0.97);
+    // foglie dietro i fiori
+    leafShaded(c, rng, -0.03, 0.035, -2.2, 0.052, 0.017, LW, 1);
+    leafShaded(c, rng, 0.042, 0.03, -0.95, 0.05, 0.016, LW, -1);
+    leafShaded(c, rng, 0.01, 0.006, -1.62, 0.056, 0.017, LW, 1);
+    leafShaded(c, rng, 0.108, 0.085, -1.3, 0.045, 0.014, LW, -1);
+    leafShaded(c, rng, 0.05, 0.185, 0.6, 0.042, 0.014, LW, 1);
+    seam(W, -0.105, 0.06, (du) => leafShaded(c, rng, -0.105 + du, 0.11, 2.0, 0.048, 0.015, LW, 1));
+    seam(W, -0.098, 0.08, (du) => peonyFull(c, rng, -0.098 + du, 0.05, 0.032, LW, { halo: 0, tilt: 0.85, rot: 0.3 }));
+    rose(c, rng, -0.055, 0.155, 0.025, LW, { halo: 0, tilt: 0.85, rot: -0.6 });
+    rose(c, rng, 0.006, 0.085, 0.036, LW, { halo: 0, tilt: 0.9, rot: -0.2 });
+    rose(c, rng, 0.08, 0.15, 0.024, LW, { halo: 0, tilt: 0.85, rot: 0.5 });
+    bud(c, rng, 0.062, 0.058, -0.9, 0.025, LW * 0.8);
+    bud(c, rng, -0.06, 0.0, -2.0, 0.022, LW * 0.8);
+    // bracciale: due fili, perle, rombi e gocce che pendono verso la mano
+    const v = -0.062;
+    ink(c);
+    line(c, -W / 2, v + 0.0065, W / 2, v + 0.0065, LW * 1.1);
+    line(c, -W / 2, v - 0.0045, W / 2, v - 0.0045, LW * 0.8);
+    for (let u = -W / 2 + 0.003, i = 0; u < W / 2; u += 0.0062, i++) {
+      if (i % 4 === 0) diamond(c, u, v + 0.001, 0.0045, 0.0075);
+      else dot(c, u, v + 0.001, 0.0016);
+      if (i % 4 === 2) {
+        line(c, u, v - 0.0045, u, v - 0.009, LW * 0.6);
+        teardrop(c, u, v - 0.0085, 0.008, 0.0021);
+      }
+    }
+  });
 
-function roseProfile(ctx: Ctx, x: number, y: number, size: number, angle: number) {
-  stamp(ctx, x, y, size / 40, size / 40, angle, () => {
-    shape(ctx, "M-3 -26 Q-23 -19 -31 3 L-36 17 Q-28 15 -24 12 Q-29 24 -17 28 Q-9 39 2 33 Q17 39 23 28 Q38 30 35 13 L40 18 Q34 -5 15 -18 L9 -26 L4 -19Z");
-    shape(ctx, "M-28 13 Q-17 6 -11 -6 Q-5 5 8 9 Q0 17 -13 17 Q-22 19 -25 23Z M-15 23 Q2 16 9 12 Q12 21 2 27 Q-6 33 -15 23Z M6 30 Q19 20 14 9 Q10 2 11 -7 Q17 5 28 9 Q34 20 21 24 Q16 30 6 30Z M-17 4 Q-16 -7 -5 -15 L4 -12 Q-8 -8 -17 4Z", marble);
-    shape(ctx, "M-5 -26 Q-16 -22 -24 -8 L-26 1 Q-10 -15 0 -15 Q8 -22 19 -20 L9 -29 L2 -23Z");
+// ------------------------------------------------------------------ manica: braccio
+/**
+ * Braccio sinistro (R 4,7 cm, giro completo): gomito a v ≈ −0,075, spalla a v ≈ +0,26.
+ * Rosa grande davanti, peonia sul lato esterno, una rosa sul retro del tricipite; il lato interno verso
+ * l'ascella resta leggero; in alto la manica sfuma in puntinato sul deltoide.
+ */
+const upperArm: Design = (c, rng, _f, _p, { rect }) =>
+  withLine(REAL, () => {
+    const W = rect.w;
+    // nero pieno dal gomito al deltoide; il lato interno (u ≈ −0,07…−0,12) si apre verso l'ascella
+    blackGround(c, rng, -W / 2 - 0.02, W / 2 + 0.02, -0.13, 0.26, (u, v) => {
+      // sul davanti e verso l'ascella la manica si chiude più in basso, sul deltoide esterno sale di più
+      const lift = 0.035 * smooth(-0.02, 0.06, u);
+      const top = 1 - smooth(0.15 + lift, 0.205 + lift, v + 0.02 * Math.sin(u * 60));
+      const armpit = 1 - smooth(0.06, 0.13, v) * (1 - smooth(0.025, 0.05, Math.abs(u + 0.09)));
+      return 0.97 * top * armpit;
+    });
+    leafShaded(c, rng, -0.03, 0.07, -2.6, 0.06, 0.018, LW, 1);
+    leafShaded(c, rng, 0.05, 0.175, 0.9, 0.055, 0.017, LW, -1);
+    leafShaded(c, rng, -0.032, 0.17, 2.3, 0.05, 0.015, LW, 1);
+    leafShaded(c, rng, 0.04, -0.03, -1.9, 0.055, 0.017, LW, -1);
+    leafShaded(c, rng, 0.11, 0.085, 1.4, 0.05, 0.015, LW, 1);
+    seam(W, -0.115, 0.06, (du) => leafShaded(c, rng, -0.115 + du, 0.05, 2.5, 0.05, 0.015, LW, -1));
+    peonyFull(c, rng, 0.088, 0.022, 0.044, LW, { halo: 0, tilt: 0.88, rot: 0.2 });
+    seam(W, 0.128, 0.04, (du) => rose(c, rng, 0.128 + du, 0.155, 0.034, LW, { halo: 0, tilt: 0.85, rot: 0.9 }));
+    rose(c, rng, 0.01, 0.112, 0.052, LW, { halo: 0, tilt: 0.92, rot: -0.15 });
+    rose(c, rng, -0.07, 0.035, 0.028, LW, { halo: 0, tilt: 0.85, rot: 0.4 });
+    bud(c, rng, -0.04, 0.115, 2.6, 0.026, LW * 0.8);
+    bud(c, rng, 0.06, 0.2, 1.1, 0.024, LW * 0.8);
   });
-}
 
-function hipTrain(ctx: Ctx) {
-  stamp(ctx, .007, 1.311, .001, .001, 0, () => {
-    shape(ctx, "M-43 -3 C13 7 39 -41 80 -59 C129 -83 178 -57 207 -19 Q228 8 252 17 Q223 14 199 -12 C166 -49 130 -65 89 -51 C43 -37 20 10 -43 -3Z");
-    shape(ctx, "M35 -34 Q55 -62 60 -85 Q62 -72 58 -60 Q71 -65 81 -64 Q56 -54 35 -34Z M173 -46 Q195 -41 210 -48 Q205 -39 200 -36 L213 -27 Q190 -36 173 -46Z");
-    shape(ctx, "M-3 -8 C37 -23 58 -69 102 -74 Q121 -77 139 -74 Q90 -76 59 -45 Q24 -12 -3 -8Z");
-    leaf(ctx, 50, -40, 35, 1.18); leaf(ctx, 68, -51, 40, -1.98);
-    leaf(ctx, 107, -58, 40, -1.25); leaf(ctx, 156, -51, 49, 1.01);
-    leaf(ctx, 188, -30, 45, -.43); leaf(ctx, 218, -1, 39, 1.54);
-    roseProfile(ctx, 136, -47, 43, -.64);
-  });
-}
+// ------------------------------------------------------------------ mano
+/**
+ * Dorso della mano sinistra (u = 0 al centro del dorso, v verso il polso; nocche a v ≈ −0,035):
+ * il mandala delle tatuatrici, con file di puntini che scendono sulle dita e una falce di luna al polso.
+ */
+const hand: Design = (c, rng) => {
+  const x = 0;
+  const y = -0.004;
+  ink(c);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + Math.PI / 2;
+    lotusPetal(c, x, y, a, 0.0075, 0.0215, 0.17, i % 2 === 0, 0.0012);
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + Math.PI / 2 + Math.PI / 12;
+    lotusPetal(c, x, y, a, 0.0075, 0.015, 0.16, true, 0.001);
+  }
+  circle(c, x, y, 0.0068, 0.0013);
+  dot(c, x, y, 0.0036);
+  erase(c);
+  dot(c, x, y, 0.0013);
+  ink(c);
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    dot(c, x + Math.cos(a) * 0.0255, y + Math.sin(a) * 0.0255, i % 2 ? 0.0007 : 0.0011);
+  }
+  // dita: file di puntini che si stringono verso le unghie
+  for (const u of [-0.019, -0.0065, 0.0065, 0.019]) {
+    for (let k = 0; k < 5; k++) dot(c, u * (1 + k * 0.05), -0.031 - k * 0.0065, 0.0013 - k * 0.00015);
+  }
+  // polso
+  crescent(c, 0, 0.033, 0.0055, Math.PI / 2);
+  dot(c, -0.011, 0.033, 0.0009);
+  dot(c, 0.011, 0.033, 0.0009);
+  stippleCurve(c, rng, spline([[-0.03, 0.02], [0, 0.026], [0.03, 0.02]]), 120, 0.004, 0.0006);
+};
 
-function drawGarden(ctx: Ctx) {
-  hipTrain(ctx);
-  shoulderSprig(ctx);
-  stamp(ctx, -.105, 1.28, .001, .001, .14, () => {
-    shape(ctx, "M-152 -70 C-190 -39 -163 31 -126 72 Q-110 88 -104 111 Q-116 90 -138 74 C-178 39 -195 -30 -166 -70Z");
-    leaf(ctx, -159, -20, 56, 1.17); leaf(ctx, -158, 21, 47, 2.29);
-    leaf(ctx, -134, 68, 39, .47);
-    roseProfile(ctx, -164, -15, 42, .88);
-    shape(ctx, "M-152 -70 Q-108 -64 -72 -29 Q-23 34 43 24 Q109 10 162 41 Q199 62 215 64 Q189 63 159 45 Q109 19 48 31 Q-26 49 -76 -22 Q-106 -55 -152 -70Z");
-    shape(ctx, "M85 23 Q110 38 119 61 Q109 43 92 38 L91 46 Q89 35 79 28Z M-75 -26 Q-95 -19 -99 4 Q-98 -12 -111 -14 Q-95 -14 -83 -29Z M149 34 Q158 34 165 29 L162 41Z");
-    leaf(ctx, -96, -44, 48, 2.32); leaf(ctx, -96, -44, 52, -2.98, -1);
-    leaf(ctx, -60, -10, 59, 1.89); leaf(ctx, -44, -1, 61, -1.89);
-    leaf(ctx, 37, 27, 44, -.91, -1); leaf(ctx, 52, 28, 49, .89);
-    leaf(ctx, 120, 26, 31, -.79); leaf(ctx, 181, 53, 28, .98);
-    roseAt(ctx, -12, 12, 61, -.28);
+// ------------------------------------------------------------------ fianco destro
+/**
+ * Fianco destro (cilindro attorno al bacino, R 15 cm; u = 0 sul fianco esterno, +u verso il davanti,
+ * v = 0 alla quota 0,88): peonia sull'anca, rosa sulla coscia, boccioli e foglie che risalgono verso la
+ * cresta iliaca e scendono lungo la coscia. Davanti il disegno si ferma lontano dall'inguine
+ * (u ≤ +0,05 sopra v −0,12; il pube è a u ≈ +0,2).
+ */
+const hip: Design = (c, rng) =>
+  withLine(REAL, () => {
+    // il pezzo segue la linea dell'anca: dalla cresta iliaca, dietro, scende sul fianco e gira sulla coscia.
+    // Il nero sta solo attorno ai fiori e lungo il ramo, poi si scioglie nella pelle: niente bordi dritti.
+    const path = spline([[-0.095, 0.115], [-0.06, 0.05], [-0.03, -0.03], [0.012, -0.12], [0.03, -0.19], [0.022, -0.255]]);
+    const near = (u: number, v: number) => {
+      let d = 1;
+      for (let s = 0; s <= path.L; s += 0.008) {
+        const p = path.at(s);
+        d = Math.min(d, Math.hypot(u - p.x, v - p.y));
+      }
+      return d;
+    };
+    const blooms: [number, number, number][] = [[-0.032, 0.0, 0.05], [0.028, -0.165, 0.058], [-0.078, 0.07, 0.026]];
+    const edge = (u: number, v: number) => smooth(-0.155, -0.12, u) * (1 - smooth(0.06, 0.09, u)) * smooth(-0.295, -0.26, v) * (1 - smooth(0.13, 0.165, v));
+    blackGround(c, rng, -0.16, 0.1, -0.3, 0.17, (u, v) => {
+      let d = 0.75 * (1 - smooth(0.012, 0.035, near(u, v)));
+      for (const [x, y, r] of blooms) d = Math.max(d, 1 - smooth(r * 0.95, r * 1.45, Math.hypot(u - x, v - y)));
+      // davanti, sopra la piega dell'inguine, il nero si ferma presto
+      return d * edge(u, v) * (1 - smooth(0.03, 0.055, u) * smooth(-0.14, -0.1, v)) * 0.95;
+    });
+    leafShaded(c, rng, -0.07, 0.025, 2.2, 0.06, 0.019, LW, 1);
+    leafShaded(c, rng, -0.01, 0.065, 0.95, 0.055, 0.017, LW, -1);
+    leafShaded(c, rng, -0.065, -0.095, -2.5, 0.06, 0.019, LW, -1);
+    leafShaded(c, rng, 0.06, -0.075, 0.1, 0.045, 0.015, LW, 1);
+    leafShaded(c, rng, -0.02, -0.23, -2.3, 0.055, 0.017, LW, 1);
+    leafShaded(c, rng, 0.06, -0.24, -0.6, 0.048, 0.015, LW, -1);
+    bud(c, rng, -0.09, 0.115, 2.0, 0.032, LW * 0.9);
+    bud(c, rng, 0.022, -0.268, -1.6, 0.028, LW * 0.9);
+    rose(c, rng, -0.032, 0.0, 0.05, LW, { halo: 0, tilt: 0.92, rot: 0.25 });
+    peonyFull(c, rng, 0.028, -0.165, 0.058, LW, { halo: 0, tilt: 0.9, rot: -0.3 });
+    rose(c, rng, -0.078, 0.07, 0.026, LW, { halo: 0, tilt: 0.85, rot: 0.8 });
   });
-}
 
-export function ritahSpalla(ctx: Ctx) {
-  leaf(ctx, -.019, .008, .053, 2.77);
-  leaf(ctx, .023, -.003, .042, -.49);
-  roseAt(ctx, 0, 0, .044, .62);
-}
+// ------------------------------------------------------------------ nuca
+/** il segno dello studio: un cerchio perfetto, pieno e senza interruzioni, con un anello sottile e un punto */
+const nape: Design = (c) => {
+  ink(c);
+  circle(c, 0, 0, 0.026, 0.0042);
+  circle(c, 0, 0, 0.0195, 0.0011);
+  dot(c, 0, 0, 0.0028);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    dot(c, Math.cos(a) * 0.0335, Math.sin(a) * 0.0335, 0.001);
+  }
+};
 
-function shoulderSprig(ctx: Ctx) {
-  stamp(ctx, -.222, 1.683, .0014, .0011, .14, () => {
-    shape(ctx, "M-61 -33 Q-26 -26 -8 -5 Q11 17 56 26 Q13 22 -10 1 Q-36 -22 -61 -26Z");
-    leaf(ctx, -32, -17, 34, 1.9); leaf(ctx, -14, -4, 27, -.52);
-    leaf(ctx, 9, 12, 32, 1.25); leaf(ctx, 25, 18, 24, -.24);
-    roseProfile(ctx, -22, -4, 24, .56);
+// ------------------------------------------------------------------ spina
+/**
+ * Colonna lungo la spina (carta vista dal retro, v = 0 alla quota 1,33): dal cerchio della nuca scende
+ * una catena di perle, un loto tra le scapole, lune che calano, rombi e una goccia finale a metà schiena.
+ */
+const spine: Design = (c, rng) => {
+  ink(c);
+  const lw = 0.0014;
+  // catena dal cerchio
+  for (let v = 0.165, i = 0; v > 0.11; v -= 0.0075, i++) dot(c, 0, v, 0.0011 + (i % 2) * 0.0005);
+  // falci affrontate e rombo
+  crescent(c, -0.012, 0.098, 0.0062, 0);
+  crescent(c, 0.012, 0.098, 0.0062, Math.PI);
+  diamond(c, 0, 0.098, 0.006, 0.011);
+  // loto tra le scapole
+  const ly = 0.05;
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + Math.PI / 2;
+    lotusPetal(c, 0, ly, a, 0.008, 0.024, 0.2, i % 2 === 0, lw);
+  }
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + Math.PI / 2 + Math.PI / 10;
+    lotusPetal(c, 0, ly, a, 0.008, 0.0165, 0.18, true, lw * 0.8);
+  }
+  circle(c, 0, ly, 0.0072, lw);
+  dot(c, 0, ly, 0.0038);
+  arcStroke(c, 0, ly, 0.029, lw * 0.8, 0, Math.PI * 2);
+  for (let i = 0; i < 28; i++) {
+    const a = (i / 28) * Math.PI * 2;
+    dot(c, Math.cos(a) * 0.0335, ly + Math.sin(a) * 0.0335, i % 2 ? 0.0006 : 0.001);
+  }
+  // fasi lunari che calano lungo la spina
+  const phases: [number, number][] = [[1, 0.0068], [0.75, 0.0062], [0.5, 0.0058], [0.25, 0.0054], [0.08, 0.005]];
+  phases.forEach(([k, r], i) => {
+    const v = 0.004 - i * 0.025;
+    moon(c, 0, v, r, k, 1, lw * 0.9);
+    dot(c, 0, v - 0.0125, 0.0008);
   });
-}
+  // rombi e goccia
+  for (let i = 0; i < 3; i++) diamond(c, 0, -0.13 - i * 0.012, 0.0058 - i * 0.0012, 0.0085 - i * 0.0015);
+  line(c, 0, -0.165, 0, -0.172, lw * 0.7);
+  teardrop(c, 0, -0.171, 0.016, 0.0042);
+  softDisk(c, 0, ly, 0.03, 0.05, 0.12);
+  stippleCurve(c, rng, spline([[0, 0.16], [0, 0.0], [0, -0.17]]), 500, 0.009, 0.0006);
+};
 
-export function ritahCollo(ctx: Ctx) {
-  stamp(ctx, .013, -.012, .00075, .00075, -.18, () => {
-    shape(ctx, "M-45 -2 Q-14 -5 0 8 Q14 19 53 13 Q21 23 -1 13 Q-18 2 -45 -2Z");
-    leaf(ctx, 1, 10, 22, 1.83); leaf(ctx, 20, 16, 26, .94);
-    shape(ctx, "M-13 3 Q-4 1 0 -11 Q2 -3 1 6 L9 11Z");
-  });
-  stamp(ctx, -.048, -.014, .001, .001, 0, () => {
-    shape(ctx, "M-124 24 C-73 31 -44 -7 -9 -9 C16 -13 35 4 68 3 Q36 -1 17 -11 Q-6 -21 -33 -6 C-69 16 -86 25 -124 24Z");
-    shape(ctx, "M-47 2 Q-37 13 -37 26 Q-33 13 -28 -5Z M-16 -10 Q-9 -1 -8 10 Q-4 -2 1 -11Z M16 -9 Q25 -4 27 9 L33 -3Z");
-    leaf(ctx, -65, 12, 29, 1.82); leaf(ctx, -48, 1, 24, -2.68);
-  });
-  stamp(ctx, -.048, .004, .00064, .00064, -.37, () => {
-    shape(ctx, "M-13 -48 Q-3 -26 -2 -8 L1 8 L5 8 Q5 -21 -13 -48Z");
-    leaf(ctx, -3, -16, 23, 2.72); leaf(ctx, 1, -7, 18, .57);
-    shape(ctx, "M-11 11 L-17 26 L-9 22 Q-15 38 -5 42 Q1 49 9 43 Q22 42 19 27 L24 32 Q21 16 8 6 L3 1Z");
-    shape(ctx, "M-9 30 Q-10 42 -3 40 Q4 39 9 28 Q-1 32 -5 20Z M-1 15 Q14 25 15 38 Q22 22 8 12Z M0 42 Q6 48 13 40 Q8 41 7 37Z", marble);
-  });
-}
+const SLEEVE_FRONT: V3 = [0.34, 0, 0.94];
+const ARM_LOW = { p: [0.263, 1.0, -0.156] as V3, dir: [-0.252, 0.916, -0.311] as V3, front: SLEEVE_FRONT };
+const ARM_UP = { p: [0.215, 1.25, -0.178] as V3, dir: [-0.05, 0.95, 0.3] as V3, front: SLEEVE_FRONT };
+const lap = (R: number, y0: number, h: number) => ({ x0: -Math.PI * R, y0, w: 2 * Math.PI * R, h });
+
+const CHARTS: ChartSpec[] = [
+  // avambraccio sinistro: dal polso (v ≈ −0.09) al gomito (v ≈ +0.19)
+  { at: [0, 0], limb: ARM_LOW, R: 0.037, tol: 0.75, facing: 0.1, gamma: 0.55, rect: lap(0.037, -0.095, 0.33), px: 2048, draw: forearm },
+  // braccio sinistro: dal gomito alla spalla
+  { at: [0, 0], limb: ARM_UP, R: 0.047, tol: 0.75, facing: 0.1, gamma: 0.55, rect: lap(0.047, -0.125, 0.405), px: 2048, draw: upperArm },
+  // dorso della mano sinistra
+  { at: [0, 0], limb: { p: [0.255, 0.855, -0.115], dir: [0.1, 1, 0], front: [1, 0, 0] }, R: 0.05, tol: 0.35, facing: 0.25, gamma: 0.6, rect: { x0: -0.05, y0: -0.065, w: 0.1, h: 0.11 }, px: 1024, draw: hand },
+  // fianco destro e coscia: cilindro attorno al bacino
+  { at: [0, 0], limb: { p: [-0.05, 0.88, -0.09], dir: [0, 1, 0.1], front: [-0.8, 0, 0.6] }, R: 0.15, tol: 0.7, facing: 0.15, gamma: 0.55, rect: { x0: -0.16, y0: -0.3, w: 0.26, h: 0.47 }, px: 2048, draw: hip },
+  // base della nuca: il cerchio
+  { at: [-0.055, 1.53], yaw: Math.PI, nr: 0.03, R: 0.07, tol: 0.5, facing: 0, gamma: 0.7, rect: { x0: -0.05, y0: -0.05, w: 0.1, h: 0.1 }, px: 1024, draw: nape },
+  // spina dorsale
+  { at: [0, 0], pin: [0.03, 1.33, -0.21], nr: 0.06, R: 0.22, up: [0, 1, 0.22], tol: 0.5, facing: 0.1, gamma: 0.7, rect: { x0: -0.06, y0: -0.2, w: 0.12, h: 0.38 }, px: 2048, draw: spine },
+];
+
+/** carte e origine dell'inchiostro della Custode: si propaga dalla goccia che tiene in mano */
+export const CUSTODE_TATTOO: Spec = {
+  yaw: 0,
+  seed: 6004,
+  origin: [AX, AY, AZ],
+  charts: CHARTS,
+};

@@ -10,7 +10,7 @@ Richiede Node.js 22 o superiore.
 
 ```sh
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:3000 (su questa macchina la 3000 è occupata: usare -p 3001)
 npm run typecheck
 npm run build && npm start
 ```
@@ -34,18 +34,19 @@ In sviluppo, `window.__pc.seek(0..1)` porta il percorso a un punto preciso.
 1. **Loader.** Un cerchio d'inchiostro si disegna mentre si caricano gli asset. Poi si sceglie "Entra con il suono" o "in silenzio".
 2. **Hero.** L'anello emerge da un lago d'inchiostro. Il vuoto interno è una membrana liquida che il puntatore increspa.
 3. **Attraversamento.** La membrana si apre e la camera passa nel cerchio con un dolly-zoom.
-4. **Galleria.** Undici soste:
-   - **Costanza** (Bernini): gioielli d'inchiostro, cioè medaglione sullo sterno, collana e volto ornato;
-   - **Antinoo**: corazza blackwork con la frase scritta in negativo nell'anello;
+4. **Galleria.** Dodici soste:
+   - **La Notte** (Michelangelo), sdraiata su un plinto lungo sotto una luce di luna: sulla coscia sollevata una falce con la stella, come quella del suo diadema, e le fasi lunari in fila lungo il femore (fine line e dotwork);
+   - **Apollo** del Belvedere, statua intera: il sole nero con la frase dello studio sul plesso solare, sotto la bandoliera, e sul braccio destro un bracciale e raggi blackwork come un'armatura;
    - **Flash**: tavole che si disegnano da sole;
    - **Nefertiti**: pietra nera e inchiostro d'oro, incorniciata dall'anello-soglia;
    - **sala dei corpi**, con i sei torsi;
    - **Il gigante**: la testa del David di Michelangelo. Un serpente black & grey gira dietro la nuca, scende lungo il collo e si chiude attorno a una rosa sulla gola; sul petto, la pietra della fionda con due ali sulle clavicole;
    - **coro** di dodici teste femminili con aureole;
-   - **La Custode**: la Venere di Milo come Ritah, la tatuatrice dello studio. Rose in black & grey realistico sulle spalle, sul collo e sul braccio, e una ghirlanda di rose e peonie che le cinge la vita, dall'anca all'altro fianco passando sopra l'ombelico. Il seno resta pulito. È vestita d'inchiostro liquido che risale.
+   - **La Custode**: la Venere con la mela di Thorvaldsen come Ritah, la tatuatrice dello studio, dea dell'inchiostro. Ha le braccia, quindi porta i tatuaggi di chi tatua: una manica intera sul braccio sinistro (rose e peonie in negativo su fumo nero, chiusa al polso da un bracciale), un mandala sul dorso della mano, un pezzo di rose e peonie che segue la linea dell'anca destra fino alla coscia. Nella mano destra, al posto della mela, una goccia d'inchiostro liquido: il disegno parte da lì. Seno, pube e volto restano puliti;
+   - **Il segno**: la camera gira attorno alla dea dal lato della manica e si ferma sul dorso. Lungo la spina una colonna di perle, un loto e le fasi lunari; alla base della nuca il segno dello studio, un cerchio perfetto.
    Ogni opera arriva in marmo intatto. Il cursore che la sfiora (su touch: un tocco) fissa l'origine del tatuaggio in quel punto e l'inchiostro si propaga sulla superficie della scultura. Se nessuno la tocca, il tatuaggio comincia a disegnarsi da solo un attimo dopo che l'opera è inquadrata (~0,65 s). I tatuaggi seguono la forma del corpo: sono stencil srotolati sulla superficie, non proiezioni piatte. Ogni opera ha la sua luce: temperatura, taglio e fascio diversi.
 5. **Ascesa e ritorno.**
-   - La camera sale lungo la Custode, si ferma sul volto e guarda in alto, nel pozzo della rotonda.
+   - Dal dorso la camera sale lungo la spina fino al cerchio sulla nuca e guarda in alto, nel pozzo della rotonda: il cerchio della pelle, poi l'oculo, poi il portale.
    - Dopo «Il cerchio si chiude», dentro l'oculo compare l'invito finale: «Ogni corpo è un'opera. La prossima potrebbe essere la tua.» con il pulsante *Prenota una consulenza* (link in `CTA_CAPTION.href`, `src/components/three/engine/stations.ts`).
    - L'oculo ha la stessa misura a schermo del cerchio iniziale, quindi una dissolvenza lo trasforma nel portale dell'hero.
    - Il giro ricomincia senza stacchi, anche scorrendo all'indietro.
@@ -63,7 +64,8 @@ Ogni tatuaggio si disegna mentre la camera arriva: un fronte d'inchiostro avanza
   - `stations.ts`: soste, testi, inquadrature per schermi verticali, lunghezze del percorso.
   - `gallery.ts`: architettura, opere, luci a pool, rotonda con oculo e pioggia, camera dell'ascesa.
   - `statueTattoos.ts`: tatuaggi delle statue, disegnati in metri su carte locali della pelle.
-  - `davidTattoo.ts`, `ritahTattoos.ts`: i pezzi grandi del gigante e della Custode (Ritah).
+  - `davidTattoo.ts`: il pezzo grande del gigante;
+  - `ritahTattoos.ts`: la Custode (Ritah), cioè messa in scena, inchiostro liquido della mela e sei carte: avambraccio, braccio, mano, fianco, nuca, spina.
   - `inkArt.ts`: primitive black & grey realistiche: rosa, peonia, foglie, serpente a scaglie, piume, sfera, fumo.
   - `torsoTattoos.ts`: tatuaggi dei torsi, su un cilindro il cui asse segue il tronco.
   - `tattoo.ts`: primitive di disegno, tavole flash.
@@ -78,7 +80,7 @@ Ogni tatuaggio si disegna mentre la camera arriva: un fronte d'inchiostro avanza
 
 ## Stato
 
-Tutti i modelli sono scansioni SMK di pubblico dominio: in totale ~2 MB di geometria. I tatuaggi e le tavole flash sono disegni procedurali e non sono attribuiti all'artista.
+Tutti i modelli sono scansioni SMK di pubblico dominio: in totale ~2,4 MB di geometria (tre statue intere, busti, teste e torsi). I tatuaggi e le tavole flash sono disegni procedurali e non sono attribuiti all'artista.
 
 Mancano ancora:
 - il logo;

@@ -16,8 +16,8 @@ import {
 } from "./materials";
 import { makeFlashCanvas } from "./tattoo";
 import { computeTorsoFrame, makeTorsoTattooCanvas, TORSO_FIT, type TorsoVariant } from "./torsoTattoos";
-import { makeStatueTattoo } from "./statueTattoos";
-import { CUSTODE_FIT, CUSTODE_SLEEVE, CUSTODE_Y, makeCustodeWrap } from "./ritahTattoos";
+import { makeStatueTattoo, STATUE_TATTOOS } from "./statueTattoos";
+import { CUSTODE, CUSTODE_LIQUID } from "./ritahTattoos";
 import { ROTUNDA, STATIONS } from "./stations";
 
 interface LightRig {
@@ -52,6 +52,8 @@ interface Exhibit {
   pivot: THREE.Object3D;
   mats: THREE.MeshStandardMaterial[];
   revealStation: number;
+  /** ultima sosta da cui l'opera può ancora cominciare a disegnarsi (la Custode: anche dal dorso) */
+  revealUntil?: number;
   rig: LightRig;
   beam: THREE.Mesh;
   follow: boolean;
@@ -108,11 +110,11 @@ const TORSO_LAYOUT: { id: string; variant: TorsoVariant; x: number; z: number; s
 const GOLD = new THREE.Color(0.62, 0.47, 0.26);
 
 /** busti sui plinti: posizione, scala d'esposizione, stazione che li rivela */
-const BUSTS: { id: string; x: number; z: number; yaw: number; scale: number; plinth: number; plinthW?: number; station: number; follow: boolean; mat?: InkStoneOptions; light?: LightStyle }[] = [
-  // Costanza: luce calda e avvolgente, come un ritratto
-  { id: "KAS1819", x: -1.9, z: -5.0, yaw: 0.75, scale: 1.75, plinth: 0.95, station: 1, follow: true, light: { hue: 0.075, sat: 0.5, light: 0.8, angle: 0.44, penumbra: 0.95, intensity: 32, beam: 0.55 } },
-  // Antinoo: luce radente e fredda che scolpisce il blackwork, nessun fascio in aria
-  { id: "KAS1513", x: 1.9, z: -9.0, yaw: -0.75, scale: 1.2, plinth: 0.85, station: 2, follow: true, light: { hue: 0.58, sat: 0.12, light: 0.86, angle: 0.3, penumbra: 0.55, intensity: 40, beam: 0, offset: [1.2, 1.3, 1.6] } },
+const BUSTS: { id: string; x: number; z: number; yaw: number; scale: number; plinth: number; plinthW?: number; plinthD?: number; plinthX?: number; station: number; follow: boolean; mat?: InkStoneOptions; light?: LightStyle }[] = [
+  // La Notte (Michelangelo), sdraiata su un plinto lungo: luce fredda di luna, alta e di lato, con il suo fascio
+  { id: "KAS112-2", x: -2.95, z: -5.25, yaw: 0.55, scale: 1.0, plinth: 0.32, plinthW: 2.2, plinthD: 0.95, plinthX: -0.24, station: 1, follow: false, light: { hue: 0.6, sat: 0.28, light: 0.84, angle: 0.5, penumbra: 0.85, intensity: 40, beam: 0.85, offset: [0.6, 3.4, 1.6] } },
+  // Apollo del Belvedere, il dio del sole: statua intera su un plinto basso, un fascio caldo e dorato dall'alto
+  { id: "KAS353", x: 2.55, z: -9.5, yaw: -0.8, scale: 1.0, plinth: 0.22, plinthW: 0.92, station: 2, follow: false, light: { hue: 0.095, sat: 0.6, light: 0.76, angle: 0.36, penumbra: 0.7, intensity: 54, beam: 1.25, offset: [-1.3, 3.0, 1.9] } },
   // Nefertiti: occhio di bue dorato, stretto e alto, un solo fascio deciso
   { id: "DEP439", x: 0, z: -15.4, yaw: 0, scale: 1.9, plinth: 0.95, station: 4, follow: false, mat: { dark: 1, inkColor: GOLD, inkMetal: 1, inkRough: 0.22, glow: 0xffb35c }, light: { hue: 0.1, sat: 0.7, light: 0.7, angle: 0.26, penumbra: 0.3, intensity: 58, beam: 1.5, offset: [0, 4.8, 0.7] } },
   // Il gigante: zenitale e fredda, spostata di lato
@@ -127,8 +129,16 @@ const CHOIR: Record<string, { scale: number; head: number }> = {
   KAS615: { scale: 1.0, head: 0.47 },
 };
 
-const VENUS_SCALE = 1.3;
+const VENUS_SCALE = CUSTODE.scale;
 const VENUS_BASE = 0.5;
+/** punto della Custode in coordinate del mondo (dallo spazio oggetto: rotazione, scala, base) */
+function custodeWorld([x, y, z]: readonly [number, number, number], out = new THREE.Vector3()) {
+  const c = Math.cos(CUSTODE.yaw);
+  const s = Math.sin(CUSTODE.yaw);
+  return out.set(ROTUNDA[0] + (x * c + z * s) * VENUS_SCALE, VENUS_BASE + y * VENUS_SCALE, ROTUNDA[2] + (-x * s + z * c) * VENUS_SCALE);
+}
+/** stazione in cui la Custode si tatua (la sosta frontale; dopo c'è quella sul dorso) */
+const CUSTODE_STATION = STATIONS.findIndex((s) => s.id === "custode");
 /** anello dell'oculo nella rotonda: raggio della linea media e del tubo (stesso rapporto del portale) */
 export const OCULUS_R = 3.0;
 const OCULUS_TUBE = 0.55;
@@ -259,8 +269,9 @@ export class Gallery {
     const statueMat = (id: string, extra: InkStoneOptions = {}) => {
       const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id), inkGrid).map(({ canvas, ...chart }) => ({ ...chart, tex: maskTexture(canvas, this.renderer, true) }));
       const m = makeInkStoneMaterial({ charts, envIntensity: 0.55, ...extra });
-      // il disegno automatico parte dal punto d'appoggio della prima carta (sterno, gola)
-      m.userData.inkOrigin = charts[0]?.C;
+      // il disegno automatico parte dall'origine dell'opera, se c'è, o dal punto d'appoggio della prima carta
+      const origin = STATUE_TATTOOS[id]?.origin;
+      m.userData.inkOrigin = origin ? new THREE.Vector3(...origin) : charts[0]?.C;
       return m;
     };
 
@@ -299,25 +310,10 @@ export class Gallery {
     this.choirMats.forEach((m) => ((m.userData.uniforms as Record<string, { value: number }>).uReveal.value = 1));
     this.buildChoir(choirIds.map(geo), choirIds);
     if (!(await breathe())) return;
-    const venusGeo = geo("KAS434");
-    const venusH = statueMeta.find((m) => m.id === "KAS434")?.height ?? 2.04;
-    const venusFrame = computeTorsoFrame(venusGeo, venusH, CUSTODE_FIT);
-    const wrapGrid = inkGrid && new URLSearchParams(window.location.search).get("inkgrid") !== "charts";
-    const venusWrap = maskTexture(makeCustodeWrap(venusFrame, texScale, wrapGrid), this.renderer, true);
-    if (!(await breathe())) return;
+    // la Custode: inchiostro liquido nella mano e sotto i piedi, la veste è la pozza da cui esce
     this.buildRotunda(
-      venusGeo,
-      statueMat("KAS434", {
-        dressY: 1.1,
-        envIntensity: 0.65,
-        tattoo: venusWrap,
-        axis: venusFrame.axis,
-        axisH: venusH,
-        yRange: CUSTODE_Y,
-        surfaceInk: inkGrid ? undefined : CUSTODE_SLEEVE,
-        inkRough: 0.69,
-        wrapGamma: 0.88,
-      }),
+      geo(CUSTODE.id),
+      statueMat(CUSTODE.id, { dressY: 0.035, envIntensity: 0.65, liquid: CUSTODE_LIQUID, inkRough: 0.5 }),
       signal,
     );
     this.buildFlashPanels(fontFamily);
@@ -472,18 +468,20 @@ export class Gallery {
     return beam;
   }
 
-  private plinth(w: number, h: number, pos: THREE.Vector3) {
+  private plinth(w: number, h: number, pos: THREE.Vector3, d = w, yaw = 0) {
     const m = new THREE.Mesh(
-      new RoundedBoxGeometry(w, h, w, 3, 0.012),
+      new RoundedBoxGeometry(w, h, d, 3, 0.012),
       new THREE.MeshStandardMaterial({ color: 0x08090a, roughness: 0.62, metalness: 0, envMapIntensity: 0.5 }),
     );
     m.position.set(pos.x, h / 2, pos.z);
+    m.rotation.y = yaw;
     this.scene.add(m);
     const glow = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(w + 0.004, 0.001, w + 0.004)),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(w + 0.004, 0.001, d + 0.004)),
       new THREE.LineBasicMaterial({ color: new THREE.Color(1, 0.92, 0.82).multiplyScalar(0.8) }),
     );
     glow.position.set(pos.x, h + 0.003, pos.z);
+    glow.rotation.y = yaw;
     this.scene.add(glow);
     return m;
   }
@@ -493,7 +491,9 @@ export class Gallery {
     const bb = geo.boundingBox!;
     const w = b.plinthW ?? Math.max(0.42, Math.min(0.7, Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * b.scale * 0.55));
     const pos = new THREE.Vector3(b.x, 0, b.z);
-    this.plinth(w, b.plinth, pos);
+    // plinto lungo (figure sdraiate): ruotato con l'opera e centrato sotto di lei
+    const px = (b.plinthX ?? 0) * b.scale;
+    this.plinth(w, b.plinth, new THREE.Vector3(b.x + px * Math.cos(b.yaw), 0, b.z - px * Math.sin(b.yaw)), b.plinthD ?? w, b.plinthD ? b.yaw : 0);
     const root = new THREE.Group();
     root.position.set(b.x, b.plinth, b.z);
     const pivot = new THREE.Group();
@@ -511,7 +511,7 @@ export class Gallery {
   }
 
   /** opera con stato del disegno; con `mesh` il cursore può tatuarla */
-  private exhibit(e: Pick<Exhibit, "root" | "pivot" | "mats" | "revealStation" | "rig" | "beam" | "follow" | "baseYaw"> & { spin?: number }, mesh?: THREE.Mesh): Exhibit {
+  private exhibit(e: Pick<Exhibit, "root" | "pivot" | "mats" | "revealStation" | "rig" | "beam" | "follow" | "baseYaw"> & { spin?: number; revealUntil?: number }, mesh?: THREE.Mesh): Exhibit {
     if (mesh) {
       const g = mesh.geometry;
       g.computeBoundingBox();
@@ -626,6 +626,7 @@ export class Gallery {
     const venus = new THREE.Mesh(venusGeo, venusMat);
     venus.scale.setScalar(VENUS_SCALE);
     venus.position.set(c.x, VENUS_BASE, c.z);
+    venus.rotation.y = CUSTODE.yaw;
     venus.castShadow = true;
     venus.receiveShadow = true;
     this.scene.add(venus);
@@ -635,7 +636,8 @@ export class Gallery {
           root: venus,
           pivot: venus,
           mats: [venusMat],
-          revealStation: STATIONS.length - 1,
+          revealStation: CUSTODE_STATION,
+          revealUntil: STATIONS.length - 1,
           rig: { pos: new THREE.Vector3(), target: new THREE.Vector3(), color: new THREE.Color(), intensity: 0, angle: 0.3, penumbra: 0.75, beam: 0, weight: 0 },
           beam: new THREE.Mesh(),
           follow: false,
@@ -659,8 +661,10 @@ export class Gallery {
       d.userData.phase = (i / 3) * Math.PI * 2;
       crown.add(d);
     }
-    crown.position.set(c.x, VENUS_BASE + 2.04 * VENUS_SCALE + 0.16, c.z - 0.04);
-    crown.rotation.set(0.62, 0, -0.1);
+    // sopra la testa china, inclinata come lei
+    const [hx, , hz] = CUSTODE.head;
+    custodeWorld([hx - 0.01, CUSTODE.height + 0.07, hz - 0.03], crown.position);
+    crown.rotation.set(0.42, CUSTODE.yaw, 0.12);
     this.scene.add(crown);
     this.crown = crown;
 
@@ -677,6 +681,12 @@ export class Gallery {
     this.renderer.domElement.addEventListener("webglcontextrestored", () => { key.shadow.needsUpdate = true; }, { signal });
     this.scene.add(key, key.target);
     this.makeBeam({ pos: key.position.clone(), target: key.target.position.clone(), color: key.color, intensity: 0, angle: 0.36, penumbra: 0.6, beam: 1, weight: 0 });
+    // controluce dal retro sinistro: disegna la schiena e la nuca quando la camera le gira attorno
+    const back = custodeWorld([0.6, 0, -1.4]);
+    const rim = new THREE.SpotLight(0xffd9b8, 30, 16, 0.42, 0.85, 1.4);
+    rim.position.set(back.x + 1.2, 6.8, back.z - 1.6);
+    rim.target.position.set(c.x, 2.3, c.z);
+    this.scene.add(rim, rim.target);
     // luce lunare dall'oculo
     const moon = new THREE.SpotLight(0xc9d6ff, 38, 26, 0.2, 0.7, 1.2);
     moon.position.set(c.x, 16, c.z);
@@ -700,6 +710,18 @@ export class Gallery {
     const count = 340;
     const rainGeo = new THREE.CapsuleGeometry(0.009, 0.42, 4, 8);
     const rainMat = new THREE.MeshPhysicalMaterial({ color: 0x020203, roughness: 0.05, clearcoat: 1, envMapIntensity: 2.6 });
+    // le gocce che passano a un passo dalla camera si ritirano: niente sbarre nere davanti alla Custode
+    rainMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        /* glsl */ `#include <begin_vertex>
+#ifdef USE_INSTANCING
+  vec3 pcDrop = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  transformed *= smoothstep(1.3, 2.4, length(pcDrop.xz - cameraPosition.xz));
+#endif`,
+      );
+    };
+    rainMat.customProgramCacheKey = () => "inkrain";
     this.rain = new THREE.InstancedMesh(rainGeo, rainMat, count);
     this.rain.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.rainState = new Float32Array(count * 4);
@@ -1043,9 +1065,11 @@ void main(){
         e.started = true;
         e.mats.forEach((m) => (m.userData.uniforms as Record<string, { value: THREE.Vector4 }>).uInkPt.value.set(this.hit.x, this.hit.y, this.hit.z, 1));
       }
-      const focus = this.interactive && Math.abs(sf - e.revealStation) < 0.45;
-      // inquadrata: la camera è ferma sulla sua stazione e l'opera è dentro lo schermo
-      if (focus && !e.started && Math.abs(sf - e.revealStation) < 0.3 && this.onScreen(e.mesh)) {
+      const last = e.revealUntil ?? e.revealStation;
+      const focus = this.interactive && sf > e.revealStation - 0.45 && sf < last + 0.45;
+      // inquadrata: la camera è ferma su una sua stazione e l'opera è dentro lo schermo
+      const still = Math.min(Math.abs(sf - e.revealStation), Math.abs(sf - last), sf > e.revealStation && sf < last ? 0 : 1) < 0.3;
+      if (focus && !e.started && still && this.onScreen(e.mesh)) {
         e.dwell += dt;
         if (e.dwell > AUTO_DELAY) {
           e.started = true;
@@ -1096,14 +1120,18 @@ void main(){
     if (!this.outroPath) {
       const last = STATIONS[STATIONS.length - 1];
       const p0 = new THREE.Vector3(...last.pos).lerp(new THREE.Vector3(...(last.mpos ?? last.pos)), this.portrait);
-      const p1 = new THREE.Vector3(c[0], 2.88, c[2] + 2.0);
+      // dal dorso: la camera sale lungo la spina fino al cerchio sulla nuca, poi alza lo sguardo all'oculo
+      const nape = custodeWorld(CUSTODE.nape);
+      const away = new THREE.Vector3(p0.x - nape.x, 0, p0.z - nape.z).normalize();
+      const p1 = nape.clone().addScaledVector(away, 1.45);
+      p1.y += 0.12;
       const p2 = new THREE.Vector3(c[0], RISE_START, c[2]);
       this.outroPath = new THREE.CatmullRomCurve3([p0, p1, p2], false, "centripetal");
       const m = new THREE.Matrix4();
       const up = new THREE.Vector3(0, 1, 0);
       this.outroLook0.set(...last.look).lerp(new THREE.Vector3(...(last.mlook ?? last.look)), this.portrait);
-      this.qA.setFromRotationMatrix(m.lookAt(p0, new THREE.Vector3(...last.look).lerp(new THREE.Vector3(...(last.mlook ?? last.look)), this.portrait), up));
-      this.qB.setFromRotationMatrix(m.lookAt(p1, new THREE.Vector3(c[0], 2.88, c[2]), up));
+      this.qA.setFromRotationMatrix(m.lookAt(p0, this.outroLook0, up));
+      this.qB.setFromRotationMatrix(m.lookAt(p1, nape, up));
       this.qC.copy(this.qB).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
     }
     if (o < OUTRO_A) {

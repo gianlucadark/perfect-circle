@@ -1,12 +1,14 @@
 /**
  * Tatuaggi delle statue come stencil appoggiati sulla pelle (canvas 2D → maschera, inchiostro = bianco).
  *
- * Ogni statua ha da una a tre carte locali (InkChart in materials.ts): un punto della superficie
+ * Ogni opera ha da una a sei carte locali (InkChart in materials.ts): un punto della superficie
  * (sterno, gola, corona), la normale media attorno e il raggio del cilindro che segue la sezione del
  * corpo, stimati dalla mesh al caricamento. Il canvas è disegnato in metri nelle coordinate della
  * carta (u = lunghezza d'arco attorno al corpo, v = quota; origine nel punto d'appoggio), così il
- * disegno avvolge collo, petto e spalle invece di proiettarsi piatto. I punti d'appoggio sono stati
- * letti da viste ortografiche e sezioni dei modelli. Disegni procedurali originali: non sono lavori dello studio.
+ * disegno avvolge collo, petto e spalle invece di proiettarsi piatto. Sulle statue intere le carte degli
+ * arti (`limb`) hanno l'asse lungo l'osso, misurato sulle sezioni della mesh, e quelle su schiena e fianchi
+ * si appoggiano a un punto 3D (`pin`). I punti d'appoggio sono stati letti da viste ortografiche con griglia
+ * metrica e da sezioni dei modelli. Disegni procedurali originali: non sono lavori dello studio.
  */
 import * as THREE from "three";
 import {
@@ -16,14 +18,13 @@ import {
   enso,
   flowerOfLife,
   leaf,
-  mandala,
   mulberry32,
   stippleRing,
   type Ctx,
   type Rng,
 } from "./tattoo";
 import { davidChest, davidNeck } from "./davidTattoo";
-import { ritahCollo, ritahSpalla } from "./ritahTattoos";
+import { CUSTODE_TATTOO } from "./ritahTattoos";
 
 export interface Rect {
   x0: number;
@@ -237,66 +238,96 @@ interface Chart {
 }
 type Design = (c: Ctx, rng: Rng, font: string, pen: ReturnType<typeof makePen>, chart: Chart) => void;
 
-/** Costanza · girocollo a filo sottile con un piccolo cerchio pendente */
-const costanzaCollo: Design = (c, _rng, _f, _p, { R }) => {
-  const lw = 0.0013;
-  const L = Math.PI * R;
-  line(c, -L, 0.0045, L, 0.0045, lw);
-  line(c, -L, -0.0035, L, -0.0035, lw * 0.7);
-  beadRow(c, -L, L, 0.0005, 0.0052, 0.00072);
-  line(c, 0, -0.0035, 0, -0.0085, lw * 0.7);
-  circle(c, 0, -0.0128, 0.0042, lw);
-  dot(c, 0, -0.0128, 0.0014);
-  dot(c, 0, -0.0195, 0.0009);
-};
-
-/** Costanza · fasi lunari lungo le clavicole, un cerchio perfetto sullo sterno, una goccia che scende */
-const costanzaPetto: Design = (c, rng) => {
-  const lw = 0.0013;
-  // il cerchio: anelli concentrici sottili, mandala piccolo al centro
-  circle(c, 0, 0, 0.026, lw * 1.5);
-  circle(c, 0, 0, 0.0215, lw * 0.6);
-  mandala(c, rng, 0, 0, 0.0175, lw * 0.7, 12);
-  for (let i = 0; i < 32; i++) {
-    const a = (i / 32) * TAU;
-    dot(c, Math.cos(a) * 0.0315, Math.sin(a) * 0.0315, i % 2 ? 0.0006 : 0.001);
-  }
-  // fasi lunari: crescono verso il centro, salgono con la linea delle clavicole
-  const phases = [0.5, 0.25, 0.08];
-  for (const s of [-1, 1] as const) {
-    let prev: Pt = [s * 0.032, 0.006];
-    phases.forEach((k, i) => {
-      const x = s * (0.046 + i * 0.027);
-      const y = 0.015 + i * 0.009 + i * i * 0.001;
-      const r = 0.0076 - i * 0.0011;
-      // filo di puntini tra una fase e l'altra
-      const [px, py] = prev;
-      const n = 5;
-      for (let j = 1; j < n; j++) {
-        const t = j / n;
-        dot(c, px + (x - s * r - px) * t, py + (y - py) * t + Math.sin(t * Math.PI) * -0.0016, 0.00055);
-      }
-      moon(c, x, y, r, k, s > 0 ? -1 : 1, lw);
-      prev = [x + s * r, y];
-    });
-    dot(c, s * 0.135, 0.04, 0.001);
-    dot(c, s * 0.144, 0.043, 0.0007);
-  }
-  // goccia lungo lo sterno
-  for (let d = 0.037, i = 0; d < 0.08; d += 0.0062, i++) {
-    if (i % 4 === 2) diamond(c, 0, -d, 0.0052, 0.0085);
-    else dot(c, 0, -d, 0.0011 - (d - 0.037) * 0.005);
-  }
-  teardrop(c, 0, -0.083, 0.012, 0.0034);
-};
-
-/** Antinoo · sole nero: anello pieno con la frase in negativo, fiore della vita, raggi e polvere d'inchiostro */
-const antinooPetto: Design = (c, rng, font, pen) => {
+/**
+ * La Notte · coscia sinistra sollevata (carta lungo il femore: v verso il ginocchio, +u verso il bordo alto
+ * della coscia). Una grande falce di luna con la stella, come quella del suo diadema, le fasi lunari in fila
+ * lungo il femore e un cielo di puntini. Fine line e dotwork; il disegno resta lontano dall'inguine.
+ */
+const notteCoscia: Design = (c, rng) => {
   const lw = 0.002;
-  // il sole sta un po' sopra il punto d'appoggio: il petto del busto è corto
-  const lift = 0.014;
+  ink(c);
+  // fasi lunari lungo il femore, dal fianco al ginocchio: nuova → piena → nuova
+  const ks = [0.08, 0.3, 0.5, 1, 0.5, 0.3, 0.08];
+  const u0 = -0.074;
+  const dv = 0.042;
+  ks.forEach((k, i) => {
+    const v = -0.13 + i * dv;
+    moon(c, u0, v, 0.0145, k, i < 3 ? 1 : -1, lw * 0.9);
+    if (i < ks.length - 1) for (let j = 1; j < 4; j++) dot(c, u0, v + 0.0145 + (j / 4) * (dv - 0.029), 0.0009);
+  });
+  // la falce grande con la stella nel suo vuoto
+  const cx = 0.016;
+  const cy = 0.03;
+  const R = 0.068;
+  c.save();
+  c.beginPath();
+  c.arc(cx, cy, R, 0, TAU);
+  c.clip();
+  for (let i = 0; i < 9000; i++) {
+    const a = rng() * TAU;
+    const r = Math.sqrt(rng()) * R;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    // dentro la falce: puntinato che si addensa verso il bordo esterno
+    const inner = Math.hypot(x - (cx + R * 0.42), y - (cy + R * 0.12));
+    if (inner < R * 0.84) continue;
+    if (rng() > 0.35 + (r / R) * 0.65) continue;
+    dot(c, x, y, 0.00062);
+  }
+  c.restore();
+  ink(c);
+  c.lineWidth = lw * 1.3;
+  c.beginPath();
+  c.arc(cx, cy, R, 0, TAU);
+  c.stroke();
+  erase(c);
+  c.beginPath();
+  c.arc(cx + R * 0.42, cy + R * 0.12, R * 0.84 - lw * 0.6, 0, TAU);
+  c.fill();
+  ink(c);
+  c.lineWidth = lw;
+  // ripassa solo l'arco interno della falce
+  c.beginPath();
+  c.arc(cx + R * 0.42, cy + R * 0.12, R * 0.84, Math.PI * 0.62, Math.PI * 1.55);
+  c.stroke();
+  // stella a otto punte
+  const sx = cx + R * 0.5;
+  const sy = cy + R * 0.12;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * TAU;
+    const L = i % 2 ? 0.011 : 0.022;
+    poly(c, [
+      [sx + Math.cos(a + 0.5) * 0.0028, sy + Math.sin(a + 0.5) * 0.0028],
+      [sx + Math.cos(a) * L, sy + Math.sin(a) * L],
+      [sx + Math.cos(a - 0.5) * 0.0028, sy + Math.sin(a - 0.5) * 0.0028],
+    ]);
+  }
+  dot(c, sx, sy, 0.0032);
+  // cielo: stelline e puntini sparsi attorno, più fitti vicino alla luna
+  for (let i = 0; i < 46; i++) {
+    const a = rng() * TAU;
+    const r = R * (1.15 + Math.pow(rng(), 1.4) * 1.1);
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r * 1.3;
+    if (Math.abs(x - u0) < 0.022) continue;
+    if (i % 7 === 0) {
+      line(c, x - 0.004, y, x + 0.004, y, lw * 0.6);
+      line(c, x, y - 0.004, x, y + 0.004, lw * 0.6);
+    } else dot(c, x, y, 0.0006 + rng() * 0.0008);
+  }
+};
+
+/**
+ * Apollo · sole nero sul plesso solare: anello pieno con la frase in negativo, fiore della vita, raggi e
+ * polvere d'inchiostro. Sta sotto la bandoliera che gli attraversa il petto e sopra l'ombelico.
+ */
+const apolloSole: Design = (c, rng, font, pen) => {
+  const lw = 0.0022;
+  const k = 0.84;
+  const lift = 0;
   c.save();
   c.translate(0, lift);
+  c.scale(k, k);
   // polvere d'inchiostro che si dirada verso l'esterno: nessun bordo netto
   stippleRing(c, rng, 0, 0, 0.083, 0.128, 5200, 0.00095);
   for (let i = 0; i < 40; i++) {
@@ -317,23 +348,59 @@ const antinooPetto: Design = (c, rng, font, pen) => {
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.fillStyle = "#000";
   const [px, py] = pen.toPx(0, lift);
-  arcText(c, "OGNI LINEA COMINCIA DA UN CERCHIO  ·  PERFECT CIRCLE  ·", px, py, 0.077 * pen.k, -Math.PI / 2, `600 ${Math.round(0.0094 * pen.k)}px ${font}`, 0.0029 * pen.k);
+  arcText(c, "OGNI LINEA COMINCIA DA UN CERCHIO  ·  PERFECT CIRCLE  ·", px, py, 0.077 * k * pen.k, -Math.PI / 2, `600 ${Math.round(0.0094 * k * pen.k)}px ${font}`, 0.0029 * k * pen.k);
   c.restore();
   ink(c);
   circle(c, 0, 0, 0.057, lw * 0.6);
   flowerOfLife(c, 0, 0, 0.048, lw * 0.8);
   dot(c, 0, 0, 0.0048);
-  // clavicole: rombi che si assottigliano verso le spalle
-  for (const s of [-1, 1]) {
-    for (let i = 0; i < 7; i++) {
-      const t = i / 6;
-      const x = s * (0.135 + t * 0.085);
-      const y = 0.07 + t * 0.01 - t * t * 0.005;
-      const size = 0.0078 - t * 0.004;
-      diamond(c, x, y, size * 0.6, size);
-    }
-  }
   c.restore();
+};
+
+/**
+ * Apollo · braccio destro, giro completo (u = 0 verso chi guarda, v lungo l'omero): bracciale blackwork,
+ * due fasce piene con una corona di triangoli in negativo, come i raggi del sole sul petto.
+ */
+const apolloBracciale: Design = (c, _rng, _f, _p, { rect }) => {
+  const W = rect.w;
+  const L = -W / 2;
+  ink(c);
+  c.fillRect(L, -0.022, W, 0.016);
+  c.fillRect(L, 0.034, W, 0.016);
+  const n = Math.round(W / 0.016);
+  for (let i = 0; i < n; i++) {
+    const u = L + ((i + 0.5) / n) * W;
+    poly(c, [[u - 0.0065, -0.004], [u, 0.03], [u + 0.0065, -0.004]]);
+    dot(c, u + W / n / 2, 0.006, 0.0016);
+  }
+  for (let i = 0; i < n * 2; i++) {
+    const u = L + ((i + 0.5) / (n * 2)) * W;
+    dot(c, u, 0.058, 0.0012);
+    dot(c, u, -0.03, 0.0012);
+  }
+};
+
+/**
+ * Apollo · avambraccio destro, giro completo (v = 0 a metà avambraccio, gomito in alto): una fascia nera
+ * al polso da cui salgono raggi pieni che si assottigliano, poi un puntinato che sfuma verso il gomito.
+ */
+const apolloRaggi: Design = (c, rng, _f, _p, { rect }) => {
+  const W = rect.w;
+  const L = -W / 2;
+  ink(c);
+  c.fillRect(L, -0.1, W, 0.03);
+  const n = 18;
+  for (let i = 0; i < n; i++) {
+    const u = L + ((i + 0.5) / n) * W;
+    const long = i % 2 === 0;
+    poly(c, [[u - W / n / 2 + 0.001, -0.071], [u, long ? 0.035 : -0.005], [u + W / n / 2 - 0.001, -0.071]]);
+    if (!long) dot(c, u, 0.008, 0.0016);
+  }
+  for (let i = 0; i < 2400; i++) {
+    const u = L + rng() * W;
+    const t = Math.pow(rng(), 1.6);
+    dot(c, u, 0.035 + t * 0.06, 0.0009 * (1.2 - t * 0.7));
+  }
 };
 
 /** Nefertiti · usekh: collare a file concentriche di perle, gocce e foglie, centrato sulla gola */
@@ -416,9 +483,23 @@ const amazzoneCollo: Design = (c, _r, _f, _p, { R }) => {
 };
 
 // ------------------------------------------------------------------ carte sul corpo
-interface ChartSpec {
+type V3 = [number, number, number];
+
+export interface ChartSpec {
   /** punto frontale (vista lungo `yaw`): ascissa e quota in spazio oggetto, lette da viste ortografiche */
   at: Pt;
+  /**
+   * Arto (braccio, avambraccio, coscia): cilindro di raggio R attorno a un asse qualsiasi, misurato sulle
+   * sezioni della mesh. `p` punto dell'asse, `dir` direzione (verso la radice dell'arto), `front` direzione
+   * che diventa u = 0 sulla carta. Con `limb` il punto `at` non serve.
+   */
+  limb?: { p: V3; dir: V3; front: V3 };
+  /** direzione di vista in cui si cerca il punto `at` (default quella dell'opera; π = dal retro) */
+  yaw?: number;
+  /** punto d'appoggio in 3D (spazio oggetto): il vertice più vicino, con la sua normale (schiena, fianchi) */
+  pin?: V3;
+  /** asse "alto" della carta quando non è verticale (schiena, fianco che seguono il corpo) */
+  up?: V3;
   /** normale orizzontale (colli: il cilindro della carta resta verticale) */
   level?: boolean;
   /** raggio entro cui si media la normale della superficie */
@@ -434,28 +515,33 @@ interface ChartSpec {
   draw: Design;
 }
 
-interface Spec {
+export interface Spec {
   yaw: number;
   seed: number;
   charts: ChartSpec[];
+  /** punto (spazio oggetto) da cui l'inchiostro si propaga quando l'opera si disegna da sola */
+  origin?: V3;
 }
 
 /** collo: giro completo, avvolge anche il retro */
 const neck = (at: Pt, v0: number, h: number, px: number, draw: Design): ChartSpec => ({ at, level: true, nr: 0.02, tol: 0.45, facing: -0.7, rect: lap(v0, h), px, draw });
 
 export const STATUE_TATTOOS: Record<string, Spec> = {
-  KAS1819: {
+  // La Notte (Michelangelo): la carta segue il femore della coscia sollevata, ancorata sulla sua faccia esterna
+  "KAS112-2": {
     yaw: 0,
-    seed: 1819,
-    charts: [
-      { at: [0.012, 0.285], nr: 0.05, tol: 0.6, facing: -0.05, rect: { x0: -0.2, y0: -0.13, w: 0.4, h: 0.2 }, px: 2048, draw: costanzaPetto },
-      neck([0.015, 0.362], -0.022, 0.04, 2048, costanzaCollo),
-    ],
+    seed: 1122,
+    charts: [{ at: [0, 0], pin: [-0.32, 0.98, 0.34], up: [-0.62, 0.78, -0.1], nr: 0.05, R: 0.12, tol: 0.55, facing: 0.05, gamma: 0.8, rect: { x0: -0.13, y0: -0.16, w: 0.25, h: 0.3 }, px: 2560, draw: notteCoscia }],
   },
-  KAS1513: {
+  // Apollo del Belvedere: il dio del sole porta il sole nero sul plesso solare, il braccio destro armato di blackwork
+  KAS353: {
     yaw: 0,
-    seed: 1513,
-    charts: [{ at: [-0.03, 0.33], nr: 0.08, tol: 0.65, facing: -0.05, rect: { x0: -0.26, y0: -0.125, w: 0.52, h: 0.27 }, px: 2560, draw: antinooPetto }],
+    seed: 353,
+    charts: [
+      { at: [0, 0], pin: [-0.355, 1.625, 0.16], nr: 0.07, tol: 0.6, facing: -0.05, rect: { x0: -0.115, y0: -0.115, w: 0.23, h: 0.23 }, px: 2560, draw: apolloSole },
+      { at: [0, 0], limb: { p: [-0.562, 1.575, -0.209], dir: [0.236, 0.97, 0.07], front: [-0.2, 0, 1] }, R: 0.06, tol: 0.6, facing: 0.1, rect: { x0: -Math.PI * 0.06, y0: -0.05, w: Math.PI * 0.12, h: 0.13 }, px: 1536, draw: apolloBracciale },
+      { at: [0, 0], limb: { p: [-0.611, 1.37, -0.14], dir: [0.15, 0.77, -0.62], front: [-0.5, 0, 0.6] }, R: 0.05, tol: 0.7, facing: 0.1, rect: { x0: -Math.PI * 0.05, y0: -0.11, w: Math.PI * 0.1, h: 0.2 }, px: 1536, draw: apolloRaggi },
+    ],
   },
   DEP439: {
     yaw: 0,
@@ -475,14 +561,8 @@ export const STATUE_TATTOOS: Record<string, Spec> = {
       { at: [0.07, 0.28], nr: 0.08, tol: 0.6, facing: -0.1, gamma: 0.62, rect: { x0: -0.36, y0: -0.3, w: 0.72, h: 0.34 }, px: 2560, draw: davidChest },
     ],
   },
-  KAS434: {
-    yaw: 0,
-    seed: 434,
-    charts: [
-      { ...neck([-0.02, 1.758], -0.04, 0.09, 2048, ritahCollo), tol: 0.3, gamma: 0.38 },
-      { at: [.172, 1.694], nr: .028, R: .15, tol: .48, facing: .15, rect: { x0: -.08, y0: -.056, w: .16, h: .112 }, px: 1024, draw: ritahSpalla },
-    ],
-  },
+  // la Custode (Ritah): manica, mano, fianco, nuca e spina, vedi ritahTattoos.ts
+  KMS6004: CUSTODE_TATTOO,
   KAS622: { yaw: 0, seed: 622, charts: [{ at: [0.0, 0.235], nr: 0.04, tol: 0.6, facing: 0, rect: { x0: -0.02, y0: -0.02, w: 0.04, h: 0.04 }, px: 512, draw: heraPetto }] },
   KAS639: { yaw: 0, seed: 639, charts: [neck([0.006, 0.11], -0.01, 0.02, 1024, korinnaCollo)] },
   KAS394: { yaw: 0, seed: 394, charts: [neck([0.007, 0.151], -0.01, 0.02, 1024, bellaCollo)] },
@@ -494,6 +574,15 @@ export const STATUE_TATTOOS: Record<string, Spec> = {
  * la normale media attorno a esso e il raggio del cilindro che meglio segue la sezione orizzontale.
  */
 function anchorChart(geo: THREE.BufferGeometry, s: ChartSpec, yaw: number) {
+  if (s.limb) {
+    const B = new THREE.Vector3(...s.limb.dir).normalize();
+    const N = new THREE.Vector3(...s.limb.front);
+    N.addScaledVector(B, -N.dot(B)).normalize();
+    const R = s.R ?? 0.045;
+    const C = new THREE.Vector3(...s.limb.p).addScaledVector(N, R);
+    const T = new THREE.Vector3().crossVectors(B, N).normalize();
+    return { C, N, T, R };
+  }
   const P = geo.attributes.position.array as ArrayLike<number>;
   if (!geo.attributes.normal) geo.computeVertexNormals();
   const Nn = geo.attributes.normal.array as ArrayLike<number>;
@@ -502,7 +591,21 @@ function anchorChart(geo: THREE.BufferGeometry, s: ChartSpec, yaw: number) {
   const F = new THREE.Vector3(sn, 0, cs);
   const count = P.length / 3;
   let best = -1;
-  for (const r of [0.004, 0.008, 0.016, 0.032]) {
+  if (s.pin) {
+    let bd = Infinity;
+    const [px, py, pz] = s.pin;
+    for (let i = 0; i < count; i++) {
+      const d = (P[i * 3] - px) ** 2 + (P[i * 3 + 1] - py) ** 2 + (P[i * 3 + 2] - pz) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    if (!geo.attributes.normal) geo.computeVertexNormals();
+    const nn = geo.attributes.normal.array as ArrayLike<number>;
+    F.set(nn[best * 3], 0, nn[best * 3 + 2]).normalize();
+  }
+  for (const r of s.pin ? [] : [0.004, 0.008, 0.016, 0.032]) {
     let bf = -Infinity;
     for (let i = 0; i < count; i++) {
       const x = P[i * 3];
@@ -534,7 +637,8 @@ function anchorChart(geo: THREE.BufferGeometry, s: ChartSpec, yaw: number) {
   N.normalize();
   if (s.level) N.setY(0).normalize();
   if (N.dot(F) < 0.3) N.lerp(F, 0.5).normalize();
-  const B = new THREE.Vector3(0, 1, 0).addScaledVector(N, -N.y).normalize();
+  const up = new THREE.Vector3(...(s.up ?? [0, 1, 0])).normalize();
+  const B = up.addScaledVector(N, -up.dot(N)).normalize();
   const T = new THREE.Vector3().crossVectors(B, N).normalize();
   B.crossVectors(N, T);
   let R = s.R ?? 0;
@@ -598,7 +702,7 @@ export function makeStatueTattoo(id: string, fontFamily: string, scale: number, 
   const s = STATUE_TATTOOS[id];
   const rng = mulberry32(s.seed);
   return s.charts.map((spec) => {
-    const a = anchorChart(geo, spec, s.yaw);
+    const a = anchorChart(geo, spec, spec.yaw ?? s.yaw);
     const rect = typeof spec.rect === "function" ? spec.rect(a.R) : spec.rect;
     const pen = makePen(rect, Math.round(spec.px * scale));
     if (grid) chartGrid(pen.c, pen, rect);

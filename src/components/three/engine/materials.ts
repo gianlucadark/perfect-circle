@@ -20,6 +20,11 @@ float pcNoise(vec2 x) {
 
 export interface InkStoneOptions {
   surfaceInk?: string;
+  /**
+   * GLSL `float liquidMask(vec3 p, vec3 n)` (spazio oggetto): zone della statua fatte d'inchiostro
+   * liquido lucido, come la veste (es. la mela della Custode, il panneggio).
+   */
+  liquid?: string;
   tattoo?: THREE.Texture | null;
   inkColor?: THREE.ColorRepresentation;
   inkMetal?: number;
@@ -34,7 +39,7 @@ export interface InkStoneOptions {
   /** esponente sui grigi della maschera avvolta (più basso = grigi più scuri, per opere molto illuminate) */
   wrapGamma?: number;
   envIntensity?: number;
-  /** tatuaggi "a stencil" che avvolgono il corpo (busti, statue): fino a tre carte, vedi InkChart */
+  /** tatuaggi "a stencil" che avvolgono il corpo (busti, statue): fino a MAX_CHARTS carte, vedi InkChart */
   charts?: InkChart[];
   origin?: [number, number]; // origine della propagazione (uv, solo torsi)
   dressY?: number; // veste d'inchiostro liquido sotto questa quota (spazio oggetto)
@@ -50,6 +55,8 @@ export interface InkStoneOptions {
  * pelle e avvolge collo, petto e spalle invece di stirarsi ai lati come in una proiezione piana.
  */
 export const AXIS_LEVELS = 16;
+/** carte per opera: 3 per busti e statue, fino a 6 per le statue intere (braccia, mani, gambe, schiena) */
+export const MAX_CHARTS = 6;
 
 export interface InkChart {
   tex: THREE.Texture;
@@ -82,19 +89,20 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
   const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, envMapIntensity: o.envIntensity ?? 0.6 });
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   blank.needsUpdate = true;
-  const charts = (o.charts ?? []).slice(0, 3);
-  const vec3s = (f: (c: InkChart) => THREE.Vector3) => [0, 1, 2].map((i) => (charts[i] ? f(charts[i]).clone() : new THREE.Vector3(0, 0, 1)));
+  const charts = (o.charts ?? []).slice(0, MAX_CHARTS);
+  // le statue intere usano più carte: gli shader dei busti restano a tre
+  const NC = charts.length > 3 ? MAX_CHARTS : 3;
+  const slots = Array.from({ length: NC }, (_, i) => i);
+  const vec3s = (f: (c: InkChart) => THREE.Vector3) => slots.map((i) => (charts[i] ? f(charts[i]).clone() : new THREE.Vector3(0, 0, 1)));
   const uniforms = {
     uTattoo: { value: o.tattoo ?? blank },
-    uTat0: { value: charts[0]?.tex ?? blank },
-    uTat1: { value: charts[1]?.tex ?? blank },
-    uTat2: { value: charts[2]?.tex ?? blank },
+    ...Object.fromEntries(slots.map((i) => [`uTat${i}`, { value: charts[i]?.tex ?? blank }])),
     uCharts: { value: charts.length },
     uCC: { value: vec3s((c) => c.C) },
     uCN: { value: vec3s((c) => c.N) },
     uCT: { value: vec3s((c) => c.T) },
-    uCRect: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].rect.x0, charts[i].rect.y0, charts[i].rect.w, charts[i].rect.h) : new THREE.Vector4(0, 0, 1, 1))) },
-    uCPar: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].R, charts[i].tol, charts[i].facing, charts[i].gamma ?? 1) : new THREE.Vector4(1, 1, 0, 0))) },
+    uCRect: { value: slots.map((i) => (charts[i] ? new THREE.Vector4(charts[i].rect.x0, charts[i].rect.y0, charts[i].rect.w, charts[i].rect.h) : new THREE.Vector4(0, 0, 1, 1))) },
+    uCPar: { value: slots.map((i) => (charts[i] ? new THREE.Vector4(charts[i].R, charts[i].tol, charts[i].facing, charts[i].gamma ?? 1) : new THREE.Vector4(1, 1, 0, 0))) },
     uReveal: { value: 0 },
     uInkColor: { value: new THREE.Color(o.inkColor ?? 0x020305) },
     uInkMetal: { value: o.inkMetal ?? 0 },
@@ -130,17 +138,18 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
         /* glsl */ `#include <common>
 varying vec3 vObj;
 varying vec3 vObjN;
-uniform sampler2D uTattoo, uTat0, uTat1, uTat2;
+uniform sampler2D uTattoo, ${slots.map((i) => `uTat${i}`).join(", ")};
 uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uWrap, uWrapGamma, uDressY, uSpan;
 uniform int uCharts;
-uniform vec3 uCC[3], uCN[3], uCT[3];
-uniform vec4 uCRect[3], uCPar[3];
+uniform vec3 uCC[${NC}], uCN[${NC}], uCT[${NC}];
+uniform vec4 uCRect[${NC}], uCPar[${NC}];
 uniform vec3 uInkColor, uGlowCol;
 uniform vec2 uYRange, uOrigin;
 uniform vec4 uInkPt, uNeedle;
 uniform vec3 uAxis[${AXIS_LEVELS}];
 uniform float uAxisH, uAxisOn;
 ${o.surfaceInk ?? ""}
+${o.liquid ?? ""}
 // carta locale srotolata su un cilindro di raggio R attorno al centro (vedi InkChart)
 void pcChart(sampler2D tex, int i, vec3 p, vec3 n, inout float ink, inout float bleed) {
   vec3 T = uCT[i], N = uCN[i];
@@ -215,9 +224,7 @@ vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
   }
   if (uCharts > 0) {
     vec3 nObj = normalize(vObjN);
-    if (uCharts > 0) pcChart(uTat0, 0, vObj, nObj, ink, bleed);
-    if (uCharts > 1) pcChart(uTat1, 1, vObj, nObj, ink, bleed);
-    if (uCharts > 2) pcChart(uTat2, 2, vObj, nObj, ink, bleed);
+${slots.map((i) => `    if (uCharts > ${i}) pcChart(uTat${i}, ${i}, vObj, nObj, ink, bleed);`).join("\n")}
     dist = length(vObj - uCC[0]) / uSpan;
   }
   // propagazione dal punto toccato: distanza misurata sulla superficie stessa (spazio oggetto)
@@ -278,6 +285,7 @@ vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
     float edge = uDressY + tend * (0.8 + 0.2 * sin(uTime * 0.5 + vObj.x * 11.0)) + 0.012 * sin(vObj.x * 23.0 + vObj.z * 17.0 + uTime * 0.7);
     pcLiquid = max(pcLiquid, 1.0 - smoothstep(edge - 0.003, edge + 0.003, vObj.y));
   }
+  ${o.liquid ? "pcLiquid = max(pcLiquid, liquidMask(vObj, normalize(vObjN)));" : ""}
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.003, 0.0032, 0.004), pcLiquid);
   pcGlow *= 1.0 - pcLiquid;
   pcHeight *= 1.0 - pcLiquid;
@@ -305,7 +313,7 @@ metalnessFactor = mix(metalnessFactor, uInkMetal, pcInk);`,
 totalEmissiveRadiance += uGlowCol * pcGlow * 11.0;`,
       );
   };
-  m.customProgramCacheKey = () => "inkstone6" + (o.surfaceInk ?? "");
+  m.customProgramCacheKey = () => `inkstone7|${NC}|` + (o.surfaceInk ?? "") + (o.liquid ?? "");
   return m;
 }
 

@@ -23,10 +23,10 @@ Prestazioni del portale:
 - **touch:** movimento diretto, con inerzia al rilascio;
 - **tastiera:** frecce, PagSu/PagGiù, spazio.
 
-La regia ne prende il modulo sulla lunghezza del giro, `TOTAL_LEN` = 2 (portale) + 10 (galleria) + 2,8 (ascesa). Lo smorzamento lavora sul valore non ridotto, così il passaggio dalla fine all'inizio non torna indietro attraverso il percorso.
+La regia ne prende il modulo sulla lunghezza del giro, `TOTAL_LEN` = 2 (portale) + 11 (galleria, 12 soste) + 2,8 (ascesa). L'ultima sosta coincide con l'inizio dell'outro: la sua didascalia resta visibile finché la camera riparte, poi entra «Il cerchio si chiude». Lo smorzamento lavora sul valore non ridotto, così il passaggio dalla fine all'inizio non torna indietro attraverso il percorso.
 
 Il punto di giunzione è costruito perché due fotogrammi coincidano:
-1. **Salita.** Dopo la Custode, la camera passa sul volto e ruota di 90° verso l'alto.
+1. **Salita.** Dopo il giro attorno alla Custode (sosta frontale, poi il dorso), la camera sale lungo la spina fino al cerchio tatuato alla base della nuca e ruota di 90° verso l'alto.
 2. **Allineamento.** La camera si porta sull'asse dell'oculo, un anello orizzontale d'inchiostro con membrana. Da lì sale con un ease-out che si ferma.
 3. **Quota dell'oculo.** In `Gallery.setSize` l'oculo è messo alla quota in cui, a fine salita, il suo raggio a schermo è uguale a quello del cerchio dell'hero:
    - galleria: `R / (d · tan(fov/2))`;
@@ -80,7 +80,7 @@ Riferimenti API: [compilazione asincrona](https://threejs.org/docs/pages/WebGLRe
 
 ## Modelli
 
-Tutte le opere sono scansioni SMK in GLB Draco, per ~2 MB in totale. Busti e statua hanno un profilo per fasce (`statues.json`). Le coordinate dei tatuaggi sono state lette da viste ortografiche con griglia metrica, renderizzate in Blender lungo la direzione di proiezione. La testa del David è proiettata a 0,7 rad, cioè frontale al volto, e la statua è ruotata dello stesso angolo verso la camera.
+Tutte le opere sono scansioni SMK in GLB Draco, per ~2,4 MB in totale. Busti e statue hanno un profilo per fasce (`statues.json`). Le tre statue intere (Notte, Apollo, Custode) sono esportate da `pc_export_classics.py` a misura umana, così i tatuaggi si disegnano in centimetri reali, e decimate a 110–150k triangoli. Gli assi degli arti (braccio, avambraccio, coscia, bacino) sono stati misurati con sezioni esatte della mesh (bisect in Blender): il centro di ogni sezione orizzontale sta sull'asse dell'arto. Le coordinate dei tatuaggi sono state lette da viste ortografiche con griglia metrica, renderizzate in Blender lungo la direzione di proiezione. La testa del David è proiettata a 0,7 rad, cioè frontale al volto, e la statua è ruotata dello stesso angolo verso la camera.
 
 ## Tatuaggi
 
@@ -88,32 +88,33 @@ Tutte le opere sono scansioni SMK in GLB Draco, per ~2 MB in totale. Busti e sta
 - **Black & grey.** Le primitive di `inkArt.ts` lavorano a grigi, non a linee:
   - ogni forma prima ripulisce la pelle sotto di sé, così un fiore disegnato dentro un nero pieno resta in negativo;
   - le rose hanno cinque giri di petali, con un'ombra sotto ogni giro, il bordo arrotolato in luce e il cuore a spirale;
-  - `withLine(k, …)` regola il peso dei contorni per un disegno intero. Con k < 0,6 (la Custode usa 0,32) le primitive passano al realismo: contorni quasi invisibili, petali chiari che si scuriscono solo dove si infilano sotto il giro interno, foglie a sfumatura continua con la nervatura in luce, cuore della rosa chiuso e scuro. La forma la danno ombre e luci, non le linee;
+  - `withLine(k, …)` regola il peso dei contorni per un disegno intero. Con k < 0,6 (la Custode usa 0,5: realismo, ma con abbastanza linea da leggersi da lontano) le primitive passano al realismo: contorni quasi invisibili, petali chiari che si scuriscono solo dove si infilano sotto il giro interno, foglie a sfumatura continua con la nervatura in luce, cuore della rosa chiuso e scuro. La forma la danno ombre e luci, non le linee;
   - `smokeCloud` mette un fumo morbido dietro ogni fiore, con un pepe d'ago solo sul bordo: i petali escono dal buio;
   - le squame del serpente sono ciottoli chiari su fondo nero, più chiari sul dorso e scuri sui fianchi, con le macchie romboidali e l'ombra portata;
   - i neri pieni (`blackFill`) hanno il bordo mosso e sfumano in un puntinato.
   Le sfocature del canvas si usano solo per le ombre larghe, perché ogni chiamata ha un costo fisso; i tratti piccoli si sfumano con passate sovrapposte. Le squame e le barbe delle piume sono raggruppate in pochi tracciati. Tra la generazione di un'opera e la successiva il caricamento cede il thread, e il loader continua ad animarsi.
 - **Repertorio:**
-  - Costanza: fasi lunari lungo le clavicole, cerchio sullo sterno, girocollo sottile;
-  - Antinoo: sole blackwork con scritta in negativo, rombi sulle clavicole;
+  - la Notte: sulla faccia esterna della coscia sollevata, una falce con la stella (come quella del diadema) e sette fasi lunari in fila lungo il femore, con un cielo di puntini; lontano dall'inguine;
+  - Apollo: sole blackwork con la frase in negativo sul plesso solare, sotto la bandoliera che attraversa il petto e sopra l'ombelico; bracciale (due fasce e triangoli in negativo) sull'omero destro e raggi pieni sull'avambraccio;
   - Nefertiti: collare usekh, anelli al collo, fregio della corona (oro su pietra nera);
   - il gigante: al collo, rosa sulla gola dentro l'ansa di un serpente. Il serpente nasce sul trapezio destro, passa dietro la nuca restando alto (più in basso la pelle scende sul trapezio e la carta non la segue), scende lungo lo sternocleidomastoideo sinistro e posa la testa sotto la mascella. Sul petto, la pietra della fionda con le ali lungo le clavicole;
-  - la Custode (Ritah): solo spalle, collo, braccio, pancia e fianchi; il seno (x da −0,15 a +0,27 e y da 1,44 a 1,61 sulla carta del tronco) resta pulito. Due rose sul deltoide destro; peonia e rosa piccola sul moncherino sinistro; una rosa sul lato del collo; una rosa sul fianco esterno del braccio, che si ferma prima del seno. In vita, una ghirlanda di rose, peonia, foglie e boccioli che cinge il corpo. Sale dall'anca destra lungo la piega della vita, passa sopra l'ombelico lungo l'arco della pancia e risale sul fianco opposto. L'ombelico resta pulito. Il busto è inclinato e torto: la ghirlanda segue la linea alba e la piega della vita misurate sulla mesh, non l'orizzontale;
+  - la Custode (Ritah, Venere con la mela): manica sinistra in due carte cilindriche lungo omero e avambraccio, su un fondo nero continuo (`blackGround`: sfumature sovrapposte fino al nero pieno, bordi che si sciolgono in puntinato), con rose e peonie in negativo; sul lato interno verso l'ascella e sul davanti della spalla il nero si apre; al polso un bracciale di perle, rombi e gocce. Mandala sul dorso della mano sinistra. Fianco destro: rosa sull'anca e peonia sulla coscia lungo la linea dell'anca; il nero sta solo attorno ai fiori e davanti si ferma lontano dall'inguine (pube a u ≈ +0,2 sulla carta, disegno entro +0,05). Alla base della nuca un cerchio perfetto; lungo la spina perle, falci, un loto, fasi lunari e una goccia. Seno, pube e volto restano puliti;
   - coro: un solo segno ciascuno, al collo o sotto la gola.
   Nessun segno sui volti.
 - **Proiezione:**
-  - statue: fino a tre carte locali per opera (`InkChart`). Ogni carta è uno stencil appoggiato sulla pelle: punto d'appoggio sulla superficie (sterno, gola, corona), normale media attorno e raggio del cilindro che segue la sezione orizzontale del corpo, tutti stimati dalla mesh al caricamento (`anchorChart`). Nello shader la coordinata orizzontale è la lunghezza d'arco attorno a quel cilindro, quella verticale la quota: il disegno si srotola su collo, petto e spalle invece di stirarsi ai lati. I colli usano un giro completo. L'inchiostro si ferma dove la superficie si allontana dal cilindro (altre parti del corpo) o gli volge le spalle;
-  - la Custode unisce le due cose (lo shader somma avvolgimento e carte): il tronco è avvolto come un torso (`CUSTODE_FIT`, `CUSTODE_Y` in `ritahTattoos.ts`, quote assolute del modello). Collo e braccio hanno carte proprie: il davanti del braccio guarda in avanti e l'avvolgimento del tronco lo scarterebbe. Il disegno del braccio si ferma a u = −0,015 della sua carta, perché oltre il cilindro del braccio tocca il seno. La Custode è l'opera più illuminata, quindi i grigi della sua maschera avvolta hanno un esponente più basso (`wrapGamma` 0,5, carte 0,38): altrimenti il tonemapping li cancella;
+  - statue: fino a tre carte locali per busto e fino a sei per le statue intere (`MAX_CHARTS`; gli shader dei busti restano a tre) (`InkChart`). Ogni carta è uno stencil appoggiato sulla pelle: punto d'appoggio sulla superficie (sterno, gola, corona), normale media attorno e raggio del cilindro che segue la sezione orizzontale del corpo, tutti stimati dalla mesh al caricamento (`anchorChart`). Nello shader la coordinata orizzontale è la lunghezza d'arco attorno a quel cilindro, quella verticale la quota: il disegno si srotola su collo, petto e spalle invece di stirarsi ai lati. I colli usano un giro completo. L'inchiostro si ferma dove la superficie si allontana dal cilindro (altre parti del corpo) o gli volge le spalle;
+  - arti: con `limb` la carta è un cilindro attorno a un asse qualsiasi (punto, direzione dell'osso, raggio misurati sulle sezioni), con u = 0 nella direzione indicata da `front` (verso la camera della sosta). Le carte a giro completo disegnano due volte i motivi vicini alla cucitura. Con `pin` la carta si appoggia al vertice più vicino a un punto 3D: serve su schiena e fianchi, dove la ricerca per vista frontale può trovare la superficie opposta;
   - torsi: un'unica carta cilindrica che avvolge il tronco, ma con l'asse che ne segue il centro quota per quota (`computeTorsoFrame`: baricentro delle sezioni, levigato in altezza), così un torso seduto o ruotato come il Belvedere resta centrato. Il canvas è in metri (arco dal centro del petto, quota); i punti anatomici sono stati letti con la griglia di debug `?inkgrid` (solo sviluppo). Niente inchiostro sulle superfici rivolte in alto, in basso o verso l'asse, né sotto una linea di cintura per torso (`BELT`): bacino, pube e cosce restano puliti. Belvedere e Psiche hanno pezzi pieni in stile black & grey: sfumature morbide, ornamenti e fiori che seguono pettorali, costole, clavicole e moncherini;
 - **Strumenti di sviluppo.**
-  - `?inkgrid` sostituisce i disegni con griglie metriche (etichette `u|v` in cm) su torsi, statue e tronco della Custode; `?inkgrid=charts` le mostra solo sulle carte locali.
+  - `?inkgrid` sostituisce i disegni con griglie metriche (etichette `u|v` in cm) su torsi e statue; `?inkgrid=charts` le mostra solo sulle carte locali.
   - `window.__pc.gallery.inspect = { pos, look }` sposta la camera liberamente e completa tutti i tatuaggi, per guardare un'opera da ogni lato; `null` torna al percorso.
 - **Texture.** Le maschere sono texture R8 (un quarto della memoria di una RGBA) con mipmap. Su schermi piccoli la risoluzione scende al 75%.
 - **Rivelazione:**
   - ogni opera arriva in marmo intatto: il disegno parte da solo ~0,65 s dopo che è inquadrata (camera sulla sua stazione, opera dentro lo schermo) e si completa in ~2,5 s, propagandosi sulla superficie dal punto d'appoggio della prima carta; il cursore che la sfiora lo fa partire subito da quel punto;
   - il fronte emette un bagliore ambrato (`uGlowCol`), che si vede in bloom come un ago caldo;
   - Nefertiti ha marmo nero e inchiostro d'oro metallico.
-- **Veste della Custode.** È inchiostro liquido lucido (`uDressY`) che risale con viticci animati.
+- **Inchiostro liquido.** `liquidMask` (GLSL passato al materiale) rende inchiostro lucido una zona della statua: nella Custode è la mela, una sfera di 4,4 cm di raggio tra le dita (le dita, appena fuori dalla sfera, restano marmo); la sua base sta in una pozza (`uDressY`) che risale con viticci. Il tatuaggio della Custode si propaga dalla mela.
+- **Pioggia della rotonda.** Le gocce a meno di ~2 m dalla camera si ritirano nel vertex shader: davanti alla Custode non passano più sbarre nere, mentre nell'ascesa (camera al centro, pioggia a 3 m) l'anello resta intero.
 
 ## Luci
 

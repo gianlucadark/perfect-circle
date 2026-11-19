@@ -326,7 +326,9 @@ export class Engine {
     let active = "";
     const sf = this.gallery.stationFloat;
     if (outro) {
-      if (o > OUTRO_CAP_WINDOW[0] && o < OUTRO_CAP_WINDOW[1]) active = "outro";
+      // l'ultima sosta coincide con l'inizio dell'outro: la sua didascalia resta finché la camera riparte
+      if (o < OUTRO_CAP_WINDOW[0] - 0.035) active = String(N - 1);
+      else if (o > OUTRO_CAP_WINDOW[0] && o < OUTRO_CAP_WINDOW[1]) active = "outro";
       else if (o > CTA_WINDOW[0] && o < CTA_WINDOW[1]) active = "cta";
     } else if (mixG === 1) {
       const r = Math.round(sf);

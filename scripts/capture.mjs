@@ -23,9 +23,10 @@ const outDir = positional[1] ?? "previews";
 const mobile = args.includes("--mobile");
 const W = Number(opt("w", mobile ? 390 : 1600));
 const H = Number(opt("h", mobile ? 844 : 900));
-// percorso: hero 2 + 10 stazioni + outro 2.8 schermate (vedi stations.ts)
-const T = 14.8;
-const def = [0, 0.7, 1.3, ...Array.from({ length: 11 }, (_, k) => 2 + k), ...[0.12, 0.3, 0.5, 0.62, 0.72, 0.85, 0.97].map((o) => 12 + o * 2.8)].map((x) => +(x / T).toFixed(4));
+// percorso: hero 2 + 11 tratti tra 12 stazioni + outro 2.8 schermate (vedi stations.ts)
+const N = 12;
+const T = 2 + (N - 1) + 2.8;
+const def = [0, 0.7, 1.3, ...Array.from({ length: N }, (_, k) => 2 + k), ...[0.12, 0.3, 0.5, 0.62, 0.72, 0.85, 0.97].map((o) => 1 + N + o * 2.8)].map((x) => +(x / T).toFixed(4));
 const stops = (opt("at", "") ? opt("at", "").split(",") : def).map(Number);
 const exp = Number(opt("exp", 1));
 const settle = Number(opt("settle", 2600));
