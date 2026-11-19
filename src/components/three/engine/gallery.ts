@@ -76,7 +76,6 @@ export interface TorsoMeta {
   id: string;
   file: string;
   height: number;
-  circumference: number;
   frontYaw: number;
 }
 
@@ -84,6 +83,11 @@ export interface StatueMeta {
   id: string;
   file: string;
   height: number;
+}
+
+export interface ModelCatalog {
+  torsos: TorsoMeta[];
+  statues: StatueMeta[];
 }
 
 const TORSO_LAYOUT: { id: string; variant: TorsoVariant; x: number; z: number; station: number; dark?: boolean; pour?: number; ink?: number; metal?: number; spin?: number; light?: LightStyle }[] = [
@@ -223,8 +227,7 @@ export class Gallery {
   }
 
   // ------------------------------------------------------------------ build
-  /** `alive`: falso se la regia è stata smontata nel frattempo (Strict Mode, cambio pagina) */
-  async load(manager: THREE.LoadingManager, fontFamily: string, torsoMeta: TorsoMeta[], statueMeta: StatueMeta[], alive: () => boolean = () => true) {
+  async load(manager: THREE.LoadingManager, fontFamily: string, { torsos: torsoMeta, statues: statueMeta }: ModelCatalog, signal: AbortSignal) {
     const draco = new DRACOLoader(manager);
     draco.setDecoderPath("/draco/");
     const loader = new GLTFLoader(manager);
@@ -232,15 +235,17 @@ export class Gallery {
     const geoOf = async (url: string) => {
       const g = await loader.loadAsync(url);
       const mesh = findMesh(g.scene);
-      const geo = mesh.geometry.clone();
-      geo.applyMatrix4(mesh.matrixWorld);
-      return geo;
+      return mesh.geometry.applyMatrix4(mesh.matrixWorld);
     };
     const [statueGeos, torsoGeos] = await Promise.all([
       Promise.all(statueMeta.map((m) => geoOf(`/models/statues/${m.file}`))),
       Promise.all(torsoMeta.map((m) => geoOf(`/models/torsos/${m.file}`))),
-    ]);
-    draco.dispose();
+      Promise.allSettled([
+        document.fonts.load(`italic 300 30px ${fontFamily}`),
+        document.fonts.load(`600 30px ${fontFamily}`),
+      ]),
+    ]).finally(() => draco.dispose());
+    if (signal.aborted) return;
     const geo = (id: string) => statueGeos[statueMeta.findIndex((m) => m.id === id)];
 
     this.buildEnvironment();
@@ -252,7 +257,7 @@ export class Gallery {
     // griglia di lettura dei torsi al posto dei disegni (solo sviluppo): ?inkgrid
     const inkGrid = process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).has("inkgrid");
     const statueMat = (id: string, extra: InkStoneOptions = {}) => {
-      const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id), inkGrid).map((t) => ({ ...t, tex: maskTexture(t.canvas, this.renderer, true) }));
+      const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id), inkGrid).map(({ canvas, ...chart }) => ({ ...chart, tex: maskTexture(canvas, this.renderer, true) }));
       const m = makeInkStoneMaterial({ charts, envIntensity: 0.55, ...extra });
       // il disegno automatico parte dal punto d'appoggio della prima carta (sterno, gola)
       m.userData.inkOrigin = charts[0]?.C;
@@ -261,7 +266,7 @@ export class Gallery {
 
     // i tatuaggi si disegnano sul thread principale: tra un'opera e l'altra si cede il passo,
     // così il cerchio del loader continua a disegnarsi
-    const breathe = () => new Promise<boolean>((r) => setTimeout(() => r(alive()), 0));
+    const breathe = () => new Promise<boolean>((r) => setTimeout(() => r(!signal.aborted), 0));
     for (const b of BUSTS) {
       this.addBust(geo(b.id), statueMat(b.id, b.mat), b);
       if (!(await breathe())) return;
@@ -313,6 +318,7 @@ export class Gallery {
         inkRough: 0.69,
         wrapGamma: 0.88,
       }),
+      signal,
     );
     this.buildFlashPanels(fontFamily);
     this.buildParticles();
@@ -580,7 +586,7 @@ export class Gallery {
     this.scene.add(l, l.target);
   }
 
-  private buildRotunda(venusGeo: THREE.BufferGeometry, venusMat: THREE.MeshStandardMaterial) {
+  private buildRotunda(venusGeo: THREE.BufferGeometry, venusMat: THREE.MeshStandardMaterial, signal: AbortSignal) {
     const c = new THREE.Vector3(...ROTUNDA);
     // pozzo cilindrico: pareti alte, fessure di luce che salgono fino all'oculo
     const stone = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.58, envMapIntensity: 0.4 });
@@ -665,6 +671,10 @@ export class Gallery {
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.bias = -0.0004;
     key.shadow.radius = 4;
+    // Nel cono della luce rientra solo la Custode, che ha una sagoma fissa.
+    key.shadow.autoUpdate = false;
+    key.shadow.needsUpdate = true;
+    this.renderer.domElement.addEventListener("webglcontextrestored", () => { key.shadow.needsUpdate = true; }, { signal });
     this.scene.add(key, key.target);
     this.makeBeam({ pos: key.position.clone(), target: key.target.position.clone(), color: key.color, intensity: 0, angle: 0.36, penumbra: 0.6, beam: 1, weight: 0 });
     // luce lunare dall'oculo
@@ -691,12 +701,15 @@ export class Gallery {
     const rainGeo = new THREE.CapsuleGeometry(0.009, 0.42, 4, 8);
     const rainMat = new THREE.MeshPhysicalMaterial({ color: 0x020203, roughness: 0.05, clearcoat: 1, envMapIntensity: 2.6 });
     this.rain = new THREE.InstancedMesh(rainGeo, rainMat, count);
-    this.rain.frustumCulled = false;
+    this.rain.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.rainState = new Float32Array(count * 4);
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const rr = OCULUS_R + (Math.random() - 0.5) * 0.7;
       this.rainState.set([c.x + Math.cos(a) * rr, Math.random() * this.oculusY, c.z + Math.sin(a) * rr, 5 + Math.random() * 4], i * 4);
+      const [x, y, z, speed] = this.rainState.subarray(i * 4, i * 4 + 4);
+      this.tmpM.makeScale(1, 1 + speed * 0.25, 1).setPosition(x, y, z);
+      this.rain.setMatrixAt(i, this.tmpM);
     }
     this.scene.add(this.rain);
   }
@@ -801,6 +814,15 @@ void main(){
     this.camera.updateProjectionMatrix();
     // l'oculo sta alla quota in cui, a fine ascesa, ha la stessa misura a schermo del cerchio iniziale
     this.oculusY = RISE_END + OCULUS_R / (heroRingScreen(aspect) * Math.tan(THREE.MathUtils.degToRad(this.fov0) / 2));
+    if (this.rain) {
+      // Dopo una rotazione dello schermo alcune gocce possono ancora superare il nuovo oculo.
+      let ceiling = this.oculusY;
+      for (let i = 1; i < this.rainState.length; i += 4) ceiling = Math.max(ceiling, this.rainState[i]);
+      this.rain.boundingSphere = new THREE.Sphere(
+        new THREE.Vector3(ROTUNDA[0], ceiling / 2, ROTUNDA[2]),
+        Math.hypot(OCULUS_R + 0.35, ceiling / 2) + 1,
+      );
+    }
     this.oculus?.position.setY(this.oculusY);
     this.outroPath = undefined; // il percorso dell'outro dipende dal formato
     this.membrane?.position.setY(this.oculusY);
@@ -927,8 +949,8 @@ void main(){
         let y = st[k * 4 + 1] - st[k * 4 + 3] * dt;
         if (y < 0.0) y = top;
         st[k * 4 + 1] = y;
-        this.tmpM.compose(this.tmpV.set(st[k * 4], y, st[k * 4 + 2]), this.tmpQ.identity(), this.tmpS.set(1, 1 + st[k * 4 + 3] * 0.25, 1));
-        this.rain.setMatrixAt(k, this.tmpM);
+        // Nella matrice di ogni goccia cambia soltanto la traslazione verticale.
+        this.rain.instanceMatrix.array[k * 16 + 13] = y;
       }
       this.rain.instanceMatrix.needsUpdate = true;
     }

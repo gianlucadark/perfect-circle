@@ -4,7 +4,7 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { portalFragment, portalVertex } from "./portalShader";
 import { CompositeShader, FinalShader } from "./post";
-import { Gallery, smoothstep, type StatueMeta, type TorsoMeta } from "./gallery";
+import { Gallery, smoothstep, type ModelCatalog } from "./gallery";
 import { shared } from "./materials";
 import { CTA_WINDOW, GALLERY_LEN, HERO_LEN, OUTRO_CAP_WINDOW, OUTRO_LEN, STATIONS, STEP_LEN, TOTAL_LEN } from "./stations";
 import { OUTRO_A } from "./gallery";
@@ -45,7 +45,7 @@ export class Engine {
   private intro = 0;
   private started = false;
   private loaded = false;
-  private disposed = false;
+  private lifetime = new AbortController();
   private time = 0;
   private captions: HTMLElement[] = [];
   private activeCap = "";
@@ -148,31 +148,34 @@ export class Engine {
     this.gallery.tap((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1));
   };
 
-  async load(cb: EngineCallbacks, fontFamily: string) {
+  private compileScene(scene: THREE.Scene, camera: THREE.Camera, target: THREE.WebGLRenderTarget) {
+    // Three sceglie la variante dello shader in base allo spazio colore del target attivo.
+    const previous = this.gl.getRenderTarget();
+    this.gl.setRenderTarget(target);
+    try {
+      return this.gl.compileAsync(scene, camera);
+    } finally {
+      this.gl.setRenderTarget(previous);
+    }
+  }
+
+  async load(cb: EngineCallbacks, fontFamily: string, models: ModelCatalog) {
+    const { signal } = this.lifetime;
+    // In Strict Mode il primo mount viene annullato prima di avviare decoder e compilazione.
+    await Promise.resolve();
+    if (signal.aborted) return;
     const manager = new THREE.LoadingManager();
     manager.onProgress = (_url, loaded, total) => cb.onProgress(loaded / Math.max(total, 1));
-    try {
-      await document.fonts.load(`italic 300 30px ${fontFamily}`);
-      await document.fonts.load(`600 30px ${fontFamily}`);
-    } catch {
-      /* font non critico */
-    }
-    if (this.disposed) return;
-    const [torsos, statues] = await Promise.all([
-      fetch("/models/torsos/torsos.json").then((r) => r.json()) as Promise<TorsoMeta[]>,
-      fetch("/models/statues/statues.json").then((r) => r.json()) as Promise<StatueMeta[]>,
+    await Promise.all([
+      this.gallery.load(manager, fontFamily, models, signal),
+      this.compileScene(this.portalScene, this.ortho, this.rtPortal),
     ]);
-    if (this.disposed) return;
-    await this.gallery.load(manager, fontFamily, torsos, statues, () => !this.disposed);
-    if (this.disposed) return;
+    if (signal.aborted) return;
     this.gallery.setSize(this.w, this.h);
     // Precompila entrambe le scene mentre il loader è ancora visibile.
     this.gallery.update(0, 0.016, 0, 1, this.mouse);
-    await Promise.all([
-      this.gl.compileAsync(this.gallery.scene, this.gallery.camera),
-      this.gl.compileAsync(this.portalScene, this.ortho),
-    ]);
-    if (this.disposed) return;
+    await this.compileScene(this.gallery.scene, this.gallery.camera, this.rtGallery);
+    if (signal.aborted) return;
     this.gl.setRenderTarget(this.rtGallery);
     this.gl.render(this.gallery.scene, this.gallery.camera);
     this.updatePortalDrops();
@@ -356,7 +359,7 @@ export class Engine {
   }
 
   dispose() {
-    this.disposed = true;
+    this.lifetime.abort();
     window.removeEventListener("pointermove", this.onPointer);
     window.removeEventListener("pointerdown", this.onDown);
     window.removeEventListener("pointerup", this.onUp);

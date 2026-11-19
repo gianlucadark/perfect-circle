@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Engine } from "./three/engine/Engine";
+import type { ModelCatalog } from "./three/engine/gallery";
 import { CTA_CAPTION, OUTRO_CAPTION, STATIONS } from "./three/engine/stations";
 
 const Experience = dynamic(() => import("./three/Experience"), { ssr: false });
@@ -28,7 +29,7 @@ function Split({ text }: { text: string }) {
   );
 }
 
-export default function InkGallery() {
+export default function InkGallery({ models }: { models: ModelCatalog }) {
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [entered, setEntered] = useState(false);
@@ -52,20 +53,27 @@ export default function InkGallery() {
     let cx = x;
     let cy = y;
     let raf = 0;
+    el.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
+    const tick = () => {
+      const nextX = cx + (x - cx) * 0.18;
+      const nextY = cy + (y - cy) * 0.18;
+      if (nextX === cx && nextY === cy) {
+        raf = 0;
+        return;
+      }
+      cx = nextX;
+      cy = nextY;
+      el.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
+      raf = requestAnimationFrame(tick);
+    };
     const move = (e: PointerEvent) => {
       x = e.clientX;
       y = e.clientY;
       const t = e.target as HTMLElement;
       el.classList.toggle("is-link", !!t.closest("button, a"));
-    };
-    const tick = () => {
-      cx += (x - cx) * 0.18;
-      cy += (y - cy) * 0.18;
-      el.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
-      raf = requestAnimationFrame(tick);
+      if (!raf) raf = requestAnimationFrame(tick);
     };
     window.addEventListener("pointermove", move, { passive: true });
-    raf = requestAnimationFrame(tick);
     return () => {
       window.removeEventListener("pointermove", move);
       cancelAnimationFrame(raf);
@@ -96,7 +104,7 @@ export default function InkGallery() {
 
   return (
     <>
-      {font && <Experience fontFamily={font} onProgress={setProgress} onReady={onReady} />}
+      {font && <Experience models={models} fontFamily={font} onProgress={setProgress} onReady={onReady} />}
 
       <div className={`loader ${entered ? "is-gone" : ""} ${ready ? "is-ready" : ""}`} aria-hidden={entered}>
         <svg className="loader__ring" viewBox="0 0 200 200" aria-hidden>
