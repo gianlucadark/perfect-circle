@@ -23,7 +23,7 @@ import {
   type Rng,
 } from "./tattoo";
 import { davidChest, davidNeck } from "./davidTattoo";
-import { ritahCollo, ritahSleeve } from "./ritahTattoos";
+import { ritahCollo, ritahSpalla } from "./ritahTattoos";
 
 export interface Rect {
   x0: number;
@@ -475,14 +475,12 @@ export const STATUE_TATTOOS: Record<string, Spec> = {
       { at: [0.07, 0.28], nr: 0.08, tol: 0.6, facing: -0.1, gamma: 0.62, rect: { x0: -0.36, y0: -0.3, w: 0.72, h: 0.34 }, px: 2560, draw: davidChest },
     ],
   },
-  // la Custode (Ritah): il tronco è una carta avvolta a parte (ritahTattoos.ts); qui solo il collo
   KAS434: {
     yaw: 0,
     seed: 434,
     charts: [
       { ...neck([-0.02, 1.758], -0.04, 0.09, 2048, ritahCollo), tol: 0.3, gamma: 0.38 },
-      // manica: cilindro attorno al braccio destro (a sinistra di chi guarda), dal moncherino alla spalla
-      { at: [-0.24, 1.52], level: true, nr: 0.03, R: 0.062, tol: 0.35, facing: -0.5, rect: lap(-0.1, 0.26), px: 2048, draw: ritahSleeve, gamma: 0.38 },
+      { at: [.172, 1.694], nr: .028, R: .15, tol: .48, facing: .15, rect: { x0: -.08, y0: -.056, w: .16, h: .112 }, px: 1024, draw: ritahSpalla },
     ],
   },
   KAS622: { yaw: 0, seed: 622, charts: [{ at: [0.0, 0.235], nr: 0.04, tol: 0.6, facing: 0, rect: { x0: -0.02, y0: -0.02, w: 0.04, h: 0.04 }, px: 512, draw: heraPetto }] },

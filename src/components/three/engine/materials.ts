@@ -19,6 +19,7 @@ float pcNoise(vec2 x) {
 `;
 
 export interface InkStoneOptions {
+  surfaceInk?: string;
   tattoo?: THREE.Texture | null;
   inkColor?: THREE.ColorRepresentation;
   inkMetal?: number;
@@ -139,6 +140,7 @@ uniform vec2 uYRange, uOrigin;
 uniform vec4 uInkPt, uNeedle;
 uniform vec3 uAxis[${AXIS_LEVELS}];
 uniform float uAxisH, uAxisOn;
+${o.surfaceInk ?? ""}
 // carta locale srotolata su un cilindro di raggio R attorno al centro (vedi InkChart)
 void pcChart(sampler2D tex, int i, vec3 p, vec3 n, inout float ink, inout float bleed) {
   vec3 T = uCT[i], N = uCN[i];
@@ -219,6 +221,7 @@ vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
     dist = length(vObj - uCC[0]) / uSpan;
   }
   // propagazione dal punto toccato: distanza misurata sulla superficie stessa (spazio oggetto)
+  ${o.surfaceInk ? "ink = max(ink, surfaceInk(vObj));" : ""}
   if (uInkPt.w > 0.5) dist = length(vObj - uInkPt.xyz) / uSpan;
   float n = pcNoise(vObj.xy * 38.0 + vObj.z * 21.0) * 0.5 + pcNoise(vObj.zy * 95.0) * 0.25;
   float rv = uReveal * 1.6 - (dist * 0.9 + n * 0.32);
@@ -302,7 +305,7 @@ metalnessFactor = mix(metalnessFactor, uInkMetal, pcInk);`,
 totalEmissiveRadiance += uGlowCol * pcGlow * 11.0;`,
       );
   };
-  m.customProgramCacheKey = () => "inkstone6";
+  m.customProgramCacheKey = () => "inkstone6" + (o.surfaceInk ?? "");
   return m;
 }
 

@@ -17,7 +17,7 @@ import {
 import { makeFlashCanvas } from "./tattoo";
 import { computeTorsoFrame, makeTorsoTattooCanvas, TORSO_FIT, type TorsoVariant } from "./torsoTattoos";
 import { makeStatueTattoo } from "./statueTattoos";
-import { CUSTODE_FIT, CUSTODE_Y, makeCustodeWrap } from "./ritahTattoos";
+import { CUSTODE_FIT, CUSTODE_SLEEVE, CUSTODE_Y, makeCustodeWrap } from "./ritahTattoos";
 import { ROTUNDA, STATIONS } from "./stations";
 
 interface LightRig {
@@ -294,11 +294,9 @@ export class Gallery {
     this.choirMats.forEach((m) => ((m.userData.uniforms as Record<string, { value: number }>).uReveal.value = 1));
     this.buildChoir(choirIds.map(geo), choirIds);
     if (!(await breathe())) return;
-    // la Custode (Ritah): il tronco è avvolto come un torso, collo e braccio hanno carte locali
     const venusGeo = geo("KAS434");
     const venusH = statueMeta.find((m) => m.id === "KAS434")?.height ?? 2.04;
     const venusFrame = computeTorsoFrame(venusGeo, venusH, CUSTODE_FIT);
-    // ?inkgrid=charts: griglia solo sulle carte locali (collo, braccio), tronco pulito
     const wrapGrid = inkGrid && new URLSearchParams(window.location.search).get("inkgrid") !== "charts";
     const venusWrap = maskTexture(makeCustodeWrap(venusFrame, texScale, wrapGrid), this.renderer, true);
     if (!(await breathe())) return;
@@ -311,8 +309,9 @@ export class Gallery {
         axis: venusFrame.axis,
         axisH: venusH,
         yRange: CUSTODE_Y,
-        // la Custode è la più illuminata: i grigi del black & grey vanno spinti, o il tonemapping li cancella
-        wrapGamma: 0.5,
+        surfaceInk: inkGrid ? undefined : CUSTODE_SLEEVE,
+        inkRough: 0.69,
+        wrapGamma: 0.88,
       }),
     );
     this.buildFlashPanels(fontFamily);
