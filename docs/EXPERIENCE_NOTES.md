@@ -84,20 +84,21 @@ Tutte le opere sono scansioni SMK in GLB Draco, per ~2 MB in totale. Busti e sta
 
 ## Tatuaggi
 
-- **Disegno.** I disegni sono in `statueTattoos.ts`. Si disegnano direttamente in metri, nello spazio oggetto, con una trasformazione del canvas. Le primitive di `tattoo.ts` non dipendono dall'unità.
+- **Disegno.** I disegni sono in `statueTattoos.ts`. Si disegnano in metri, nelle coordinate di una carta locale della pelle (vedi sotto), con una trasformazione del canvas. Le primitive di `tattoo.ts` non dipendono dall'unità.
 - **Repertorio:**
-  - medaglioni, ghirlande di perle e gocce, collane;
-  - corazza blackwork con scritta in negativo;
-  - collare usekh;
-  - serpente a scaglie;
-  - corona;
-  - bodysuit ornamentale.
+  - Costanza: fasi lunari lungo le clavicole, cerchio sullo sterno, girocollo sottile;
+  - Antinoo: sole blackwork con scritta in negativo, rombi sulle clavicole;
+  - Nefertiti: collare usekh, anelli al collo, fregio della corona (oro su pietra nera);
+  - il gigante: serpente a scaglie avvolto attorno al collo;
+  - la Custode: mandala sullo sterno, lampadario di gocce, colonna fino all'ombelico, girocollo a punte;
+  - coro: un solo segno ciascuno, al collo o sotto la gola.
+  Nessun segno sui volti.
 - **Proiezione:**
-  - statue: planare lungo un'imbardata, sfumata dove la superficie volge le spalle alla proiezione;
+  - statue: fino a tre carte locali per opera (`InkChart`). Ogni carta è uno stencil appoggiato sulla pelle: punto d'appoggio sulla superficie (sterno, gola, corona), normale media attorno e raggio del cilindro che segue la sezione orizzontale del corpo, tutti stimati dalla mesh al caricamento (`anchorChart`). Nello shader la coordinata orizzontale è la lunghezza d'arco attorno a quel cilindro, quella verticale la quota: il disegno si srotola su collo, petto e spalle invece di stirarsi ai lati. I colli usano un giro completo. L'inchiostro si ferma dove la superficie si allontana dal cilindro (altre parti del corpo) o gli volge le spalle;
   - torsi: cilindrica.
 - **Texture.** Le maschere sono texture R8 (un quarto della memoria di una RGBA) con mipmap. Su schermi piccoli la risoluzione scende al 75%.
 - **Rivelazione:**
-  - l'inchiostro si propaga dall'origine del disegno mentre la camera arriva (stazione − 0,62 → stazione);
+  - ogni opera arriva in marmo intatto: il disegno parte da solo ~0,65 s dopo che è inquadrata (camera sulla sua stazione, opera dentro lo schermo) e si completa in ~2,5 s, propagandosi sulla superficie dal punto d'appoggio della prima carta; il cursore che la sfiora lo fa partire subito da quel punto;
   - il fronte emette un bagliore ambrato (`uGlowCol`), che si vede in bloom come un ago caldo;
   - Nefertiti ha marmo nero e inchiostro d'oro metallico.
 - **Veste della Custode.** È inchiostro liquido lucido (`uDressY`) che risale con viticci animati.

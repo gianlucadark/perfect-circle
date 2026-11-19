@@ -1,16 +1,18 @@
 /**
- * Tatuaggi delle statue in proiezione planare (canvas 2D → maschera, inchiostro = bianco).
+ * Tatuaggi delle statue come stencil appoggiati sulla pelle (canvas 2D → maschera, inchiostro = bianco).
  *
- * Il canvas copre un rettangolo nello spazio oggetto del modello (metri, y in alto), visto lungo
- * la direzione di proiezione (yaw attorno a Y, 0 = fronte +Z). Si disegna direttamente in metri:
- * le coordinate dei punti anatomici sono state lette da viste ortografiche con griglia.
- * Disegni procedurali originali: non sono lavori dello studio.
+ * Ogni statua ha da una a tre carte locali (InkChart in materials.ts): un punto della superficie
+ * (sterno, gola, corona), la normale media attorno e il raggio del cilindro che segue la sezione del
+ * corpo, stimati dalla mesh al caricamento. Il canvas è disegnato in metri nelle coordinate della
+ * carta (u = lunghezza d'arco attorno al corpo, v = quota; origine nel punto d'appoggio), così il
+ * disegno avvolge collo, petto e spalle invece di proiettarsi piatto. I punti d'appoggio sono stati
+ * letti da viste ortografiche e sezioni dei modelli. Disegni procedurali originali: non sono lavori dello studio.
  */
+import * as THREE from "three";
 import {
   arcText,
   circle,
   dot,
-  dotworkGradient,
   enso,
   flowerOfLife,
   leaf,
@@ -26,14 +28,6 @@ export interface Rect {
   y0: number;
   w: number;
   h: number;
-}
-
-export interface StatueTattoo {
-  canvas: HTMLCanvasElement;
-  rect: Rect;
-  yaw: number;
-  /** origine della propagazione dell'inchiostro, in uv del rettangolo */
-  origin: [number, number];
 }
 
 type Pt = [number, number];
@@ -298,371 +292,462 @@ function makePen(rect: Rect, maxPx: number) {
   return { canvas, c, k, toPx };
 }
 
-const uvOf = (r: Rect, x: number, y: number): [number, number] => [(x - r.x0) / r.w, (y - r.y0) / r.h];
+// ------------------------------------------------------------------ motivi ricorrenti
+/** giro completo attorno al collo: rettangolo della carta largo una circonferenza */
+const lap = (v0: number, h: number) => (R: number): Rect => ({ x0: -Math.PI * R, y0: v0, w: TAU * R, h });
+
+/** fase lunare: k = 0 nuova (solo contorno), 0.5 mezza, 1 piena; `side` = lato illuminato */
+function moon(c: Ctx, x: number, y: number, r: number, k: number, side: 1 | -1, lw: number) {
+  circle(c, x, y, r, lw);
+  if (k >= 0.99) return dot(c, x, y, r);
+  if (k <= 0.01) return;
+  c.save();
+  c.beginPath();
+  c.arc(x, y, r, 0, TAU);
+  c.clip();
+  if (Math.abs(k - 0.5) < 0.01) {
+    c.fillRect(side > 0 ? x : x - r, y - r, r, r * 2);
+  } else if (k > 0.5) {
+    dot(c, x, y, r);
+    erase(c);
+    const e = r * (2 * k - 1);
+    c.beginPath();
+    c.ellipse(x - side * r * 0.5, y, Math.max(r * 0.5 - e * 0.5, 0.0001), r, 0, 0, TAU);
+    c.fill();
+    ink(c);
+  } else {
+    // falce: semidisco illuminato meno un'ellisse
+    c.fillRect(side > 0 ? x : x - r, y - r, r, r * 2);
+    erase(c);
+    c.beginPath();
+    c.ellipse(x, y, r * (1 - 2 * k), r, 0, 0, TAU);
+    c.fill();
+    ink(c);
+  }
+  c.restore();
+  circle(c, x, y, r, lw);
+}
+
+/** filo di perline lungo una quota costante, per tutto il giro */
+function beadRow(c: Ctx, u0: number, u1: number, v: number, step: number, r: number) {
+  for (let u = u0 + step / 2; u < u1; u += step) dot(c, u, v, r);
+}
 
 // ------------------------------------------------------------------ disegni
-type Design = (c: Ctx, rng: Rng, font: string, pen: ReturnType<typeof makePen>) => Pt;
+interface Chart {
+  R: number;
+  rect: Rect;
+}
+type Design = (c: Ctx, rng: Rng, font: string, pen: ReturnType<typeof makePen>, chart: Chart) => void;
 
-/** Costanza (Bernini): gioielli d'inchiostro, medaglione sullo sterno, collana, volto ornato */
-const costanza: Design = (c, rng) => {
-  const lw = 0.0017;
-  line(c, -0.05, 0.375, 0.066, 0.377, lw);
-  line(c, -0.05, 0.367, 0.066, 0.369, lw);
-  for (let x = -0.044; x <= 0.062; x += 0.0072) dot(c, x, 0.371 + (x + 0.05) * 0.017, 0.00125);
-  line(c, 0.008, 0.367, 0.008, 0.36, lw * 0.8);
-  circle(c, 0.008, 0.354, 0.0058, lw * 1.2);
-  dot(c, 0.008, 0.354, 0.0024);
-  teardrop(c, 0.008, 0.3475, 0.011, 0.0034);
-
-  const cx = -0.007;
-  const cy = 0.292;
-  mandala(c, rng, cx, cy, 0.03, lw * 0.9, 12);
-  circle(c, cx, cy, 0.0345, lw * 2.4);
-  for (let i = 0; i < 28; i++) {
-    const a = (i / 28) * TAU;
-    dot(c, cx + Math.cos(a) * 0.04, cy + Math.sin(a) * 0.04, i % 2 ? 0.0011 : 0.0018);
-  }
-  for (const s of [-1, 1]) {
-    swag(c, cx + s * 0.04, cy + 0.012, s * 0.098, 0.322, 0.012, { lw, bead: 0.0013, step: 0.0066, dropEvery: 3, drop: 0.0095 });
-    swag(c, cx + s * 0.037, cy - 0.014, s * 0.074, 0.303, 0.02, { lw: lw * 0.8, bead: 0.001, step: 0.006, dropEvery: 2, drop: 0.0075 });
-  }
-  chain(c, cx, cy - 0.044, 0.07, 0.0056, 0.0014, 0.017, 0.005);
-  chain(c, cx - 0.014, cy - 0.04, 0.042, 0.0056, 0.0011, 0.012, 0.0037);
-  chain(c, cx + 0.014, cy - 0.04, 0.042, 0.0056, 0.0011, 0.012, 0.0037);
-
-  for (const [ex, dir] of [
-    [-0.022, -1],
-    [0.035, 1],
-  ] as const) {
-    for (let i = 0; i < 5; i++) {
-      const t = i / 4;
-      dot(c, ex + dir * (-0.006 + t * 0.022), 0.4772 - Math.sin(t * Math.PI) * 0.0032 + t * 0.003, 0.0008 + t * 0.0009);
-    }
-  }
-  circle(c, 0.008, 0.538, 0.0058, lw);
-  dot(c, 0.008, 0.538, 0.0019);
-  dot(c, 0.013, 0.4178, 0.0014);
-  dot(c, 0.013, 0.4118, 0.0011);
-  dot(c, 0.013, 0.4068, 0.0008);
-  crescent(c, 0.071, 0.506, 0.0088, Math.PI * 0.15);
-  dot(c, 0.079, 0.493, 0.0013);
-  dot(c, 0.076, 0.487, 0.0009);
-  return [cx, cy];
+/** Costanza · girocollo a filo sottile con un piccolo cerchio pendente */
+const costanzaCollo: Design = (c, _rng, _f, _p, { R }) => {
+  const lw = 0.0013;
+  const L = Math.PI * R;
+  line(c, -L, 0.0045, L, 0.0045, lw);
+  line(c, -L, -0.0035, L, -0.0035, lw * 0.7);
+  beadRow(c, -L, L, 0.0005, 0.0052, 0.00072);
+  line(c, 0, -0.0035, 0, -0.0085, lw * 0.7);
+  circle(c, 0, -0.0128, 0.0042, lw);
+  dot(c, 0, -0.0128, 0.0014);
+  dot(c, 0, -0.0195, 0.0009);
 };
 
-/** Antinoo: corazza blackwork, anello pieno con scritta in negativo, raggi e fiore della vita */
-const antinoo: Design = (c, rng, font, pen) => {
-  const lw = 0.0024;
-  const cx = 0;
-  const cy = 0.31;
-  clip(c, -0.27, 0.212, 0.54, 0.222, () => {
-    stippleRing(c, rng, cx, cy, 0.104, 0.215, 7000, 0.0011);
-    for (let i = 0; i < 48; i++) {
-      const a = (i / 48) * TAU;
-      const r0 = 0.118;
-      const r1 = i % 2 === 0 ? 0.192 : 0.152;
-      const hw = (Math.PI / 48) * 0.62;
-      poly(c, [
-        [cx + Math.cos(a - hw) * r0, cy + Math.sin(a - hw) * r0],
-        [cx + Math.cos(a) * r1, cy + Math.sin(a) * r1],
-        [cx + Math.cos(a + hw) * r0, cy + Math.sin(a + hw) * r0],
-      ]);
-    }
-  });
-  circle(c, cx, cy, 0.101, 0.019);
-  // scritta in negativo dentro l'anello
+/** Costanza · fasi lunari lungo le clavicole, un cerchio perfetto sullo sterno, una goccia che scende */
+const costanzaPetto: Design = (c, rng) => {
+  const lw = 0.0013;
+  // il cerchio: anelli concentrici sottili, mandala piccolo al centro
+  circle(c, 0, 0, 0.026, lw * 1.5);
+  circle(c, 0, 0, 0.0215, lw * 0.6);
+  mandala(c, rng, 0, 0, 0.0175, lw * 0.7, 12);
+  for (let i = 0; i < 32; i++) {
+    const a = (i / 32) * TAU;
+    dot(c, Math.cos(a) * 0.0315, Math.sin(a) * 0.0315, i % 2 ? 0.0006 : 0.001);
+  }
+  // fasi lunari: crescono verso il centro, salgono con la linea delle clavicole
+  const phases = [0.5, 0.25, 0.08];
+  for (const s of [-1, 1] as const) {
+    let prev: Pt = [s * 0.032, 0.006];
+    phases.forEach((k, i) => {
+      const x = s * (0.046 + i * 0.027);
+      const y = 0.015 + i * 0.009 + i * i * 0.001;
+      const r = 0.0076 - i * 0.0011;
+      // filo di puntini tra una fase e l'altra
+      const [px, py] = prev;
+      const n = 5;
+      for (let j = 1; j < n; j++) {
+        const t = j / n;
+        dot(c, px + (x - s * r - px) * t, py + (y - py) * t + Math.sin(t * Math.PI) * -0.0016, 0.00055);
+      }
+      moon(c, x, y, r, k, s > 0 ? -1 : 1, lw);
+      prev = [x + s * r, y];
+    });
+    dot(c, s * 0.135, 0.04, 0.001);
+    dot(c, s * 0.144, 0.043, 0.0007);
+  }
+  // goccia lungo lo sterno
+  for (let d = 0.037, i = 0; d < 0.08; d += 0.0062, i++) {
+    if (i % 4 === 2) diamond(c, 0, -d, 0.0052, 0.0085);
+    else dot(c, 0, -d, 0.0011 - (d - 0.037) * 0.005);
+  }
+  teardrop(c, 0, -0.083, 0.012, 0.0034);
+};
+
+/** Antinoo · sole nero: anello pieno con la frase in negativo, fiore della vita, raggi e polvere d'inchiostro */
+const antinooPetto: Design = (c, rng, font, pen) => {
+  const lw = 0.002;
+  // il sole sta un po' sopra il punto d'appoggio: il petto del busto è corto
+  const lift = 0.014;
+  c.save();
+  c.translate(0, lift);
+  // polvere d'inchiostro che si dirada verso l'esterno: nessun bordo netto
+  stippleRing(c, rng, 0, 0, 0.083, 0.128, 5200, 0.00095);
+  for (let i = 0; i < 40; i++) {
+    const a = (i / 40) * TAU + Math.PI / 40;
+    const r0 = 0.087;
+    const long = i % 2 === 0;
+    const r1 = long ? 0.125 : 0.106;
+    const hw = (Math.PI / 40) * (long ? 0.55 : 0.4);
+    poly(c, [
+      [Math.cos(a - hw) * r0, Math.sin(a - hw) * r0],
+      [Math.cos(a) * r1, Math.sin(a) * r1],
+      [Math.cos(a + hw) * r0, Math.sin(a + hw) * r0],
+    ]);
+    if (!long) dot(c, Math.cos(a) * 0.114, Math.sin(a) * 0.114, 0.0014);
+  }
+  circle(c, 0, 0, 0.077, 0.016);
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.fillStyle = "#000";
-  const [px, py] = pen.toPx(cx, cy);
-  arcText(c, "OGNI LINEA COMINCIA DA UN CERCHIO  ·  PERFECT CIRCLE  ·", px, py, 0.101 * pen.k, -Math.PI / 2, `600 ${Math.round(0.0118 * pen.k)}px ${font}`, 0.0042 * pen.k);
+  const [px, py] = pen.toPx(0, lift);
+  arcText(c, "OGNI LINEA COMINCIA DA UN CERCHIO  ·  PERFECT CIRCLE  ·", px, py, 0.077 * pen.k, -Math.PI / 2, `600 ${Math.round(0.0094 * pen.k)}px ${font}`, 0.0029 * pen.k);
   c.restore();
   ink(c);
-  flowerOfLife(c, cx, cy, 0.066, lw * 0.85);
-  dot(c, cx, cy, 0.006);
+  circle(c, 0, 0, 0.057, lw * 0.6);
+  flowerOfLife(c, 0, 0, 0.048, lw * 0.8);
+  dot(c, 0, 0, 0.0048);
+  // clavicole: rombi che si assottigliano verso le spalle
   for (const s of [-1, 1]) {
-    for (let i = 0; i < 9; i++) {
-      const t = i / 8;
-      const x = s * (0.05 + t * 0.18);
-      const y = 0.432 + t * 0.036;
-      const size = 0.0095 - t * 0.0045;
-      diamond(c, x, y, size * 0.62, size);
-      if (i < 8) dot(c, x + s * 0.0113, y + 0.0023, 0.0012);
+    for (let i = 0; i < 7; i++) {
+      const t = i / 6;
+      const x = s * (0.135 + t * 0.085);
+      const y = 0.07 + t * 0.01 - t * t * 0.005;
+      const size = 0.0078 - t * 0.004;
+      diamond(c, x, y, size * 0.6, size);
     }
   }
-  c.fillRect(-0.28, 0.218, 0.56, 0.017);
-  erase(c);
-  for (let x = -0.27; x <= 0.27; x += 0.017) dot(c, x, 0.2265, 0.0045);
-  ink(c);
-  line(c, 0, 0.413, 0, 0.427, lw);
-  circle(c, 0.035, 0.603, 0.0075, lw * 0.8);
-  dot(c, 0.035, 0.603, 0.0029);
-  return [cx, cy];
+  c.restore();
 };
 
-/** Nefertiti: collare usekh, anelli sul collo, occhi alati, disco solare sulla corona (oro su pietra nera) */
-const nefertiti: Design = (c, rng) => {
+/** Nefertiti · usekh: collare a file concentriche di perle, gocce e foglie, centrato sulla gola */
+const nefertitiCollare: Design = (c) => {
   const lw = 0.0014;
-  const ccx = -0.02;
-  const ccy = 0.245;
-  clip(c, -0.125, 0.095, 0.21, 0.111, () => {
-    arcStroke(c, ccx, ccy, 0.044, lw * 1.5);
-    beadsArc(c, ccx, ccy, 0.0505, 30, 0.0016);
-    arcStroke(c, ccx, ccy, 0.057, lw);
-    for (let i = 0; i <= 26; i++) {
-      const a = Math.PI + (Math.PI * i) / 26;
-      teardrop(c, ccx + Math.cos(a) * 0.061, ccy + Math.sin(a) * 0.061, 0.0145, 0.0036, a);
-    }
-    arcStroke(c, ccx, ccy, 0.079, lw * 1.3);
-    beadsArc(c, ccx, ccy, 0.0845, 44, 0.0013);
-    arcStroke(c, ccx, ccy, 0.0895, lw);
-    for (let i = 0; i <= 20; i++) {
-      const a = Math.PI + (Math.PI * i) / 20;
-      leaf(c, ccx + Math.cos(a) * 0.094, ccy + Math.sin(a) * 0.094, a, 0.024, lw);
-      dot(c, ccx + Math.cos(a) * 0.112, ccy + Math.sin(a) * 0.112, 0.0018);
-    }
-    arcStroke(c, ccx, ccy, 0.122, lw * 2.4);
-    beadsArc(c, ccx, ccy, 0.1285, 60, 0.0016);
-  });
-  [0.212, 0.222, 0.232, 0.242].forEach((y, i) => {
-    const hw = 0.041 - (y - 0.212) * 0.12;
-    line(c, -0.005 - hw, y, -0.005 + hw, y, lw * (i === 0 ? 1.8 : 1.1));
-  });
-  for (let x = -0.04; x <= 0.03; x += 0.0062) dot(c, x, 0.227, 0.0011);
-  const wing = (x: number, y: number, s: number) => {
-    c.beginPath();
-    c.moveTo(x, y + 0.0016);
-    c.quadraticCurveTo(x + s * 0.013, y + 0.0032, x + s * 0.027, y + 0.016);
-    c.quadraticCurveTo(x + s * 0.014, y - 0.0008, x, y - 0.0019);
-    c.closePath();
-    c.fill();
-  };
-  wing(-0.059, 0.383, -1);
-  wing(0.034, 0.383, 1);
-  teardrop(c, -0.05, 0.3715, 0.012, 0.0028);
-  teardrop(c, 0.025, 0.3715, 0.012, 0.0028);
-  circle(c, -0.009, 0.408, 0.0056, lw);
-  dot(c, -0.009, 0.408, 0.0019);
-  line(c, -0.008, 0.296, -0.008, 0.2855, lw * 1.2);
-  dot(c, -0.008, 0.2805, 0.0019);
-  for (let x = -0.084; x <= 0.068; x += 0.0127) {
-    circle(c, x, 0.437, 0.0042, lw * 0.9);
-    dot(c, x, 0.437, 0.0014);
+  const cx = 0;
+  const cy = 0.042;
+  const arcs = (r: number, w: number) => arcStroke(c, cx, cy, r, w);
+  arcs(0.046, lw * 1.6);
+  beadsArc(c, cx, cy, 0.052, 30, 0.0016);
+  arcs(0.058, lw);
+  for (let i = 0; i <= 26; i++) {
+    const a = Math.PI + (Math.PI * i) / 26;
+    teardrop(c, cx + Math.cos(a) * 0.062, cy + Math.sin(a) * 0.062, 0.0145, 0.0036, a);
   }
-  line(c, -0.09, 0.4465, 0.075, 0.4465, lw);
-  line(c, -0.09, 0.4275, 0.075, 0.4275, lw);
-  enso(c, rng, -0.01, 0.535, 0.03, 0.0026);
-  circle(c, -0.01, 0.535, 0.019, lw);
-  dot(c, -0.01, 0.535, 0.004);
+  arcs(0.08, lw * 1.3);
+  beadsArc(c, cx, cy, 0.0855, 44, 0.0013);
+  arcs(0.0905, lw);
+  for (let i = 0; i <= 22; i++) {
+    const a = Math.PI + (Math.PI * i) / 22;
+    leaf(c, cx + Math.cos(a) * 0.095, cy + Math.sin(a) * 0.095, a, 0.024, lw);
+    dot(c, cx + Math.cos(a) * 0.113, cy + Math.sin(a) * 0.113, 0.0018);
+  }
+  arcs(0.123, lw * 2.4);
+  beadsArc(c, cx, cy, 0.1295, 64, 0.0016);
+};
+
+/** Nefertiti · anelli d'oro attorno al collo */
+const nefertitiCollo: Design = (c, _rng, _f, _p, { R }) => {
+  const lw = 0.0014;
+  const L = Math.PI * R;
+  [-0.016, -0.006, 0.004, 0.014].forEach((v, i) => line(c, -L, v, L, v, lw * (i === 0 ? 1.8 : 1.1)));
+  beadRow(c, -L, L, -0.001, 0.0062, 0.0011);
+};
+
+/** Nefertiti · fregio della corona: cerchi tra due fili, zig-zag in alto, disco solare sulla fronte */
+const nefertitiCorona: Design = (c, rng, _f, _p, { R }) => {
+  const lw = 0.0014;
+  const L = Math.PI * R;
+  line(c, -L, 0.0095, L, 0.0095, lw);
+  line(c, -L, -0.0095, L, -0.0095, lw);
+  for (let u = -L + 0.0064; u < L; u += 0.0128) {
+    circle(c, u, 0, 0.0042, lw * 0.9);
+    dot(c, u, 0, 0.0014);
+  }
   c.lineWidth = lw;
   c.beginPath();
-  for (let i = 0; i <= 26; i++) {
-    const x = -0.108 + i * 0.008;
-    const y = 0.578 + (i % 2 ? 0.0055 : -0.0055);
-    if (i) c.lineTo(x, y);
-    else c.moveTo(x, y);
+  const n = Math.round((2 * L) / 0.008);
+  for (let i = 0; i <= n; i++) {
+    const u = -L + (i * 2 * L) / n;
+    const v = 0.128 + (i % 2 ? 0.0055 : -0.0055);
+    if (i) c.lineTo(u, v);
+    else c.moveTo(u, v);
   }
   c.stroke();
-  return [ccx, 0.19];
+  enso(c, rng, 0, 0.088, 0.028, 0.0026);
+  circle(c, 0, 0.088, 0.018, lw);
+  dot(c, 0, 0.088, 0.004);
 };
 
-/** Testa del David: serpente sul collo, cerchio sulla fronte, lacrime sotto l'occhio */
-const david: Design = (c) => {
-  const lw = 0.0045;
-  serpent(
-    c,
-    [
-      [0.3, 0.075],
-      [0.14, 0.11],
-      [-0.08, 0.15],
-      [-0.2, 0.235],
-      [-0.12, 0.33],
-      [0.07, 0.37],
-      [0.19, 0.44],
-      [0.2, 0.51],
-      [0.155, 0.555],
-    ],
-    0.058,
-    lw,
-  );
-  circle(c, 0.045, 0.985, 0.032, 0.0095);
-  dot(c, 0.045, 0.985, 0.009);
-  teardrop(c, -0.08, 0.84, 0.024, 0.0075);
-  teardrop(c, -0.083, 0.808, 0.019, 0.006);
-  teardrop(c, -0.086, 0.781, 0.015, 0.0045);
-  return [0.0, 0.3];
+/** Il gigante · un serpente si avvolge attorno al collo e posa la testa sotto la mascella */
+const davidCollo: Design = (c, _rng, _f, _p, { R }) => {
+  const lw = 0.004;
+  const turns = 1.12;
+  const phi0 = 0.12 * Math.PI - turns * TAU;
+  const ctrl: Pt[] = [];
+  const n = 14;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const phi = phi0 + (0.12 * Math.PI - phi0) * t;
+    // sale piano dietro il collo e risale sotto il mento
+    ctrl.push([R * phi, -0.04 + t * 0.088 + Math.sin(t * TAU * turns) * 0.007]);
+  }
+  const w = Math.min(0.055, R * 0.45);
+  for (const shift of [0, TAU * R]) serpent(c, ctrl.map(([u, v]) => [u + shift, v]), w, lw);
 };
 
-/** Venere, la Custode: bodysuit ornamentale, corona sull'attaccatura dei capelli. La veste d'inchiostro è nello shader. */
-const venere: Design = (c, rng) => {
-  const lw = 0.0026;
-  for (let i = 0; i < 9; i++) {
-    const x = -0.034 + i * 0.0125;
-    const y = 1.912 + Math.sin((i / 8) * Math.PI) * 0.004;
+/** Venere, la Custode · girocollo a punte (una corona abbassata al collo) */
+const venereCollo: Design = (c, _rng, _f, _p, { R }) => {
+  const lw = 0.002;
+  const L = Math.PI * R;
+  line(c, -L, -0.005, L, -0.005, lw);
+  line(c, -L, 0.009, L, 0.009, lw * 0.7);
+  for (let u = -L, i = 0; u < L; u += 0.009, i++) {
     const tall = i % 2 === 0;
     poly(c, [
-      [x - 0.0048, y],
-      [x, y + (tall ? 0.018 : 0.011)],
-      [x + 0.0048, y],
+      [u - 0.0032, -0.005],
+      [u, -0.005 + (tall ? 0.0105 : 0.0062)],
+      [u + 0.0032, -0.005],
     ]);
-    if (tall) dot(c, x, y + 0.0225, 0.0022);
   }
-  line(c, -0.04, 1.91, 0.075, 1.91, lw * 0.8);
-  teardrop(c, 0.057, 1.856, 0.011, 0.003);
-  dot(c, 0.026, 1.806, 0.0018);
-  dot(c, 0.026, 1.799, 0.0014);
+  chain(c, 0, -0.007, 0.012, 0.0055, 0.0014, 0.01, 0.003);
+};
 
-  line(c, -0.075, 1.752, 0.052, 1.758, lw);
-  line(c, -0.075, 1.744, 0.052, 1.75, lw);
-  for (let x = -0.07; x <= 0.05; x += 0.0085) dot(c, x, 1.748 + (x + 0.075) * 0.047, 0.0014);
-  chain(c, -0.01, 1.741, 0.026, 0.0065, 0.0017, 0.014, 0.0042);
-
-  swag(c, -0.012, 1.698, -0.205, 1.665, 0.028, { lw, bead: 0.0019, step: 0.0095, dropEvery: 2, drop: 0.013 });
-  swag(c, -0.004, 1.698, 0.19, 1.726, 0.028, { lw, bead: 0.0019, step: 0.0095, dropEvery: 2, drop: 0.013 });
-
-  mandala(c, rng, 0.022, 1.615, 0.05, lw, 14);
-  circle(c, 0.022, 1.615, 0.056, lw * 2.6);
+/** Venere, la Custode · mandala sullo sterno, un lampadario di gocce tra i seni, una colonna di gioielli fino all'ombelico */
+const venerePetto: Design = (c, rng) => {
+  const lw = 0.0024;
+  mandala(c, rng, 0, 0, 0.042, lw, 14);
+  circle(c, 0, 0, 0.048, lw * 2.2);
   for (let i = 0; i < 36; i++) {
     const a = (i / 36) * TAU;
-    dot(c, 0.022 + Math.cos(a) * 0.0625, 1.615 + Math.sin(a) * 0.0625, i % 2 ? 0.0014 : 0.0024);
+    dot(c, Math.cos(a) * 0.055, Math.sin(a) * 0.055, i % 2 ? 0.0013 : 0.0022);
   }
-  chain(c, 0.024, 1.551, 0.02, 0.0065, 0.0018, 0.0001, 0.0001);
-  flowerOfLife(c, 0.03, 1.495, 0.026, lw * 0.85);
-  circle(c, 0.03, 1.495, 0.032, lw * 2.2);
-  swag(c, 0.0, 1.47, -0.14, 1.445, -0.012, { lw, bead: 0.0016, step: 0.009, dropEvery: 2, drop: 0.012 });
-  swag(c, 0.06, 1.47, 0.205, 1.472, -0.012, { lw, bead: 0.0016, step: 0.009, dropEvery: 2, drop: 0.012 });
-  for (let d = 0; d < 0.16; d += 0.0095) {
-    const t = d / 0.16;
-    dot(c, 0.032 + t * 0.022, 1.458 - d, 0.0021 - t * 0.0006);
-    if (Math.round(d / 0.0095) % 4 === 2) diamond(c, 0.032 + t * 0.022, 1.458 - d, 0.007, 0.011);
+  // clavicole: due archi di puntini che salgono verso le spalle
+  for (const s of [-1, 1]) {
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16;
+      dot(c, s * (0.05 + t * 0.17), 0.04 + t * 0.06 - t * t * 0.025, 0.0018 - t * 0.0008);
+    }
   }
-  circle(c, 0.056, 1.262, 0.02, lw * 1.5);
+  // lampadario: un arco di perle sotto il mandala e catenelle di lunghezze diverse
+  swag(c, -0.05, -0.03, 0.05, -0.03, 0.022, { lw: lw * 0.8, bead: 0.0016, step: 0.0085 });
+  for (const [x, len] of [
+    [-0.036, 0.018],
+    [-0.02, 0.034],
+    [0.02, 0.034],
+    [0.036, 0.018],
+  ]) {
+    const top = -0.03 - 0.044 * (1 - Math.pow(Math.abs(x) / 0.05, 2)) * 0.5;
+    chain(c, x, top, len, 0.0062, 0.0015, 0.011, 0.0032);
+  }
+  // colonna dello sterno fino all'ombelico
+  for (let d = 0.065, i = 0; d < 0.31; d += 0.0095, i++) {
+    const t = (d - 0.065) / 0.245;
+    const x = t * 0.03;
+    if (i % 4 === 2) diamond(c, x, -d, 0.0075, 0.012);
+    else dot(c, x, -d, 0.0021 - t * 0.0007);
+  }
+  circle(c, 0.034, -0.338, 0.019, lw * 1.4);
   for (let i = 0; i < 18; i++) {
     const a = (i / 18) * TAU;
-    dot(c, 0.056 + Math.cos(a) * 0.027, 1.262 + Math.sin(a) * 0.027, 0.0017);
+    dot(c, 0.034 + Math.cos(a) * 0.026, -0.338 + Math.sin(a) * 0.026, 0.0016);
   }
-
-  mandala(c, rng, -0.19, 1.6, 0.045, lw * 0.9, 12);
-  circle(c, -0.19, 1.6, 0.05, lw * 2.2);
-  mandala(c, rng, 0.185, 1.69, 0.034, lw * 0.9, 10);
-  circle(c, 0.185, 1.69, 0.039, lw * 2.2);
-
-  line(c, -0.25, 1.468, -0.125, 1.478, lw);
-  line(c, -0.25, 1.52, -0.125, 1.53, lw);
-  c.fillRect(-0.25, 1.48, 0.125, 0.011);
-  for (let x = -0.245; x < -0.13; x += 0.0125) {
-    poly(c, [
-      [x, 1.493],
-      [x + 0.00625, 1.512],
-      [x + 0.0125, 1.493],
-    ]);
-  }
-
-  for (const [x0, y0, x1, y1] of [
-    [-0.135, 1.42, -0.11, 1.2],
-    [0.205, 1.44, 0.19, 1.22],
-  ]) {
-    const n = 22;
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;
-      const x = x0 + (x1 - x0) * t;
-      const y = y0 + (y1 - y0) * t;
-      if (i % 4 === 0) diamond(c, x, y, 0.008, 0.013);
-      else dot(c, x, y, 0.0016);
-    }
-  }
-  dotworkGradient(c, rng, -0.1, 1.33, 0.05, 0.1, 2200, 0.0013);
-  dotworkGradient(c, rng, 0.175, 1.34, 0.045, 0.1, 2000, 0.0013);
-  lace(c, -0.22, 0.26, 1.155, 0.013, lw);
-  return [0.022, 1.615];
 };
 
-/** Teste del coro: un segno forte e leggibile da lontano per ciascuna */
-const hera: Design = (c) => {
-  circle(c, 0.004, 0.476, 0.0085, 0.0024);
-  dot(c, 0.004, 0.476, 0.003);
-  crescent(c, 0.0, 0.252, 0.05, Math.PI / 2);
-  dot(c, 0.0, 0.272, 0.0045);
-  dot(c, -0.022, 0.282, 0.0028);
-  dot(c, 0.022, 0.282, 0.0028);
-  return [0.0, 0.3];
+/** Teste del coro: un solo segno ciascuna, al collo o sotto la gola */
+const heraPetto: Design = (c) => {
+  circle(c, 0, 0, 0.012, 0.0022);
+  dot(c, 0, 0, 0.0035);
 };
-const korinna: Design = (c) => {
-  for (const [ex, dir] of [
-    [-0.06, -1],
-    [0.0, 1],
-  ] as const) {
-    for (let i = 0; i < 5; i++) {
-      const t = i / 4;
-      dot(c, ex + dir * (-0.01 + t * 0.03), 0.342 - Math.sin(t * Math.PI) * 0.004 + t * 0.004, 0.0013 + t * 0.0012);
-    }
-  }
-  line(c, -0.02, 0.236, -0.02, 0.218, 0.0034);
-  dot(c, -0.02, 0.212, 0.0028);
-  c.fillRect(-0.11, 0.142, 0.19, 0.015);
-  erase(c);
-  for (let x = -0.105; x < 0.08; x += 0.014) dot(c, x, 0.1495, 0.0038);
-  ink(c);
-  diamond(c, -0.03, 0.412, 0.009, 0.016);
-  return [-0.02, 0.3];
+const korinnaCollo: Design = (c, _r, _f, _p, { R }) => beadRow(c, -Math.PI * R, Math.PI * R, 0, 0.0085, 0.0021);
+const bellaCollo: Design = (c, _r, _f, _p, { R }) => {
+  line(c, -Math.PI * R, 0.0035, Math.PI * R, 0.0035, 0.0018);
+  line(c, -Math.PI * R, -0.0035, Math.PI * R, -0.0035, 0.0018);
 };
-const bella: Design = (c, rng) => {
-  enso(c, rng, 0.0, 0.365, 0.016, 0.0026);
-  line(c, -0.05, 0.178, 0.05, 0.178, 0.0026);
-  line(c, -0.05, 0.168, 0.05, 0.168, 0.0018);
-  diamond(c, 0.0, 0.156, 0.01, 0.018);
-  dot(c, 0.06, 0.272, 0.0024);
-  dot(c, 0.066, 0.262, 0.0019);
-  dot(c, 0.07, 0.253, 0.0014);
-  return [0.0, 0.28];
-};
-const amazzone: Design = (c) => {
-  c.lineWidth = 0.0032;
+const amazzoneCollo: Design = (c, _r, _f, _p, { R }) => {
+  line(c, -Math.PI * R, 0, Math.PI * R, 0, 0.0026);
+  c.lineWidth = 0.0022;
   c.beginPath();
-  const tx = -0.012;
-  const ty = 0.262;
-  const R = 0.05;
-  for (let i = 0; i < 3; i++) {
-    const a = -Math.PI / 2 + Math.PI + (i / 3) * TAU;
-    const x = tx + Math.cos(a) * R;
-    const y = ty + Math.sin(a) * R;
-    if (i) c.lineTo(x, y);
-    else c.moveTo(x, y);
-  }
+  c.moveTo(-0.0055, -0.0025);
+  c.lineTo(0.0055, -0.0025);
+  c.lineTo(0, -0.0125);
   c.closePath();
   c.stroke();
-  circle(c, tx, ty, 0.019, 0.0026);
-  dot(c, tx, ty, 0.0055);
-  for (const s of [-1, 1]) swag(c, tx + s * 0.03, 0.325, tx + s * 0.13, 0.31, 0.004, { lw: 0.0018, bead: 0.0016, step: 0.009 });
-  dot(c, -0.012, 0.517, 0.0022);
-  dot(c, -0.012, 0.508, 0.0018);
-  dot(c, -0.012, 0.5, 0.0014);
-  return [tx, ty];
 };
 
-interface Spec {
-  rect: Rect;
-  yaw: number;
+// ------------------------------------------------------------------ carte sul corpo
+interface ChartSpec {
+  /** punto frontale (vista lungo `yaw`): ascissa e quota in spazio oggetto, lette da viste ortografiche */
+  at: Pt;
+  /** normale orizzontale (colli: il cilindro della carta resta verticale) */
+  level?: boolean;
+  /** raggio entro cui si media la normale della superficie */
+  nr?: number;
+  /** raggio del cilindro (altrimenti stimato dalla sezione della superficie) */
+  R?: number;
+  tol?: number;
+  facing?: number;
+  rect: Rect | ((R: number) => Rect);
   px: number;
-  seed: number;
   draw: Design;
 }
 
+interface Spec {
+  yaw: number;
+  seed: number;
+  charts: ChartSpec[];
+}
+
+/** collo: giro completo, avvolge anche il retro */
+const neck = (at: Pt, v0: number, h: number, px: number, draw: Design): ChartSpec => ({ at, level: true, nr: 0.02, tol: 0.45, facing: -0.7, rect: lap(v0, h), px, draw });
+
 export const STATUE_TATTOOS: Record<string, Spec> = {
-  KAS1819: { rect: { x0: -0.18, y0: 0.13, w: 0.36, h: 0.5 }, yaw: 0, px: 2048, seed: 1819, draw: costanza },
-  KAS1513: { rect: { x0: -0.3, y0: 0.2, w: 0.6, h: 0.45 }, yaw: 0, px: 2048, seed: 1513, draw: antinoo },
-  DEP439: { rect: { x0: -0.13, y0: 0.09, w: 0.26, h: 0.51 }, yaw: 0, px: 2048, seed: 439, draw: nefertiti },
-  KAS2232: { rect: { x0: -0.45, y0: 0.0, w: 0.95, h: 1.37 }, yaw: 0.7, px: 2560, seed: 2232, draw: david },
-  KAS434: { rect: { x0: -0.32, y0: 1.0, w: 0.64, h: 1.04 }, yaw: 0, px: 3072, seed: 434, draw: venere },
-  KAS622: { rect: { x0: -0.16, y0: 0.1, w: 0.32, h: 0.52 }, yaw: 0, px: 1024, seed: 622, draw: hera },
-  KAS639: { rect: { x0: -0.16, y0: 0.1, w: 0.32, h: 0.42 }, yaw: 0, px: 1024, seed: 639, draw: korinna },
-  KAS394: { rect: { x0: -0.13, y0: 0.1, w: 0.26, h: 0.36 }, yaw: 0, px: 1024, seed: 394, draw: bella },
-  KAS615: { rect: { x0: -0.17, y0: 0.1, w: 0.34, h: 0.51 }, yaw: 0, px: 1024, seed: 615, draw: amazzone },
+  KAS1819: {
+    yaw: 0,
+    seed: 1819,
+    charts: [
+      { at: [0.012, 0.285], nr: 0.05, tol: 0.6, facing: -0.05, rect: { x0: -0.2, y0: -0.13, w: 0.4, h: 0.2 }, px: 2048, draw: costanzaPetto },
+      neck([0.015, 0.362], -0.022, 0.04, 2048, costanzaCollo),
+    ],
+  },
+  KAS1513: {
+    yaw: 0,
+    seed: 1513,
+    charts: [{ at: [-0.03, 0.33], nr: 0.08, tol: 0.65, facing: -0.05, rect: { x0: -0.26, y0: -0.125, w: 0.52, h: 0.27 }, px: 2560, draw: antinooPetto }],
+  },
+  DEP439: {
+    yaw: 0,
+    seed: 439,
+    charts: [
+      { at: [-0.013, 0.205], nr: 0.05, tol: 0.75, facing: -0.3, rect: { x0: -0.2, y0: -0.105, w: 0.4, h: 0.15 }, px: 2048, draw: nefertitiCollare },
+      neck([-0.013, 0.25], -0.022, 0.044, 1024, nefertitiCollo),
+      { ...neck([-0.005, 0.44], -0.02, 0.16, 2048, nefertitiCorona), tol: 0.6 },
+    ],
+  },
+  KAS2232: {
+    yaw: 0.7,
+    seed: 2232,
+    charts: [{ ...neck([0.07, 0.45], -0.11, 0.2, 2560, davidCollo), nr: 0.04, tol: 0.7 }],
+  },
+  KAS434: {
+    yaw: 0,
+    seed: 434,
+    charts: [
+      { at: [0.02, 1.6], nr: 0.08, tol: 0.6, facing: -0.05, rect: { x0: -0.28, y0: -0.37, w: 0.56, h: 0.47 }, px: 3072, draw: venerePetto },
+      { ...neck([-0.02, 1.758], -0.03, 0.045, 2048, venereCollo), tol: 0.3 },
+    ],
+  },
+  KAS622: { yaw: 0, seed: 622, charts: [{ at: [0.0, 0.235], nr: 0.04, tol: 0.6, facing: 0, rect: { x0: -0.02, y0: -0.02, w: 0.04, h: 0.04 }, px: 512, draw: heraPetto }] },
+  KAS639: { yaw: 0, seed: 639, charts: [neck([0.006, 0.11], -0.01, 0.02, 1024, korinnaCollo)] },
+  KAS394: { yaw: 0, seed: 394, charts: [neck([0.007, 0.151], -0.01, 0.02, 1024, bellaCollo)] },
+  KAS615: { yaw: 0, seed: 615, charts: [{ ...neck([0.02, 0.338], -0.017, 0.025, 1024, amazzoneCollo), tol: 0.4 }] },
 };
 
-export function makeStatueTattoo(id: string, fontFamily: string, scale = 1): StatueTattoo {
+/**
+ * Ancora la carta alla superficie reale: il punto più avanzato del modello sulla verticale di `at`,
+ * la normale media attorno a esso e il raggio del cilindro che meglio segue la sezione orizzontale.
+ */
+function anchorChart(geo: THREE.BufferGeometry, s: ChartSpec, yaw: number) {
+  const P = geo.attributes.position.array as ArrayLike<number>;
+  if (!geo.attributes.normal) geo.computeVertexNormals();
+  const Nn = geo.attributes.normal.array as ArrayLike<number>;
+  const cs = Math.cos(yaw);
+  const sn = Math.sin(yaw);
+  const F = new THREE.Vector3(sn, 0, cs);
+  const count = P.length / 3;
+  let best = -1;
+  for (const r of [0.004, 0.008, 0.016, 0.032]) {
+    let bf = -Infinity;
+    for (let i = 0; i < count; i++) {
+      const x = P[i * 3];
+      const y = P[i * 3 + 1];
+      const z = P[i * 3 + 2];
+      const da = x * cs - z * sn - s.at[0];
+      const dy = y - s.at[1];
+      if (da * da + dy * dy > r * r) continue;
+      const f = x * sn + z * cs;
+      if (f > bf) {
+        bf = f;
+        best = i;
+      }
+    }
+    if (best >= 0) break;
+  }
+  const C = best >= 0 ? new THREE.Vector3(P[best * 3], P[best * 3 + 1], P[best * 3 + 2]) : new THREE.Vector3(s.at[0] * cs, s.at[1], -s.at[0] * sn);
+  const N = new THREE.Vector3();
+  const nr = s.nr ?? 0.04;
+  const v = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]);
+    if (v.distanceToSquared(C) > nr * nr) continue;
+    n.set(Nn[i * 3], Nn[i * 3 + 1], Nn[i * 3 + 2]);
+    if (n.dot(F) > -0.2) N.add(n);
+  }
+  if (N.lengthSq() < 1e-8) N.copy(F);
+  N.normalize();
+  if (s.level) N.setY(0).normalize();
+  if (N.dot(F) < 0.3) N.lerp(F, 0.5).normalize();
+  const B = new THREE.Vector3(0, 1, 0).addScaledVector(N, -N.y).normalize();
+  const T = new THREE.Vector3().crossVectors(B, N).normalize();
+  B.crossVectors(N, T);
+  let R = s.R ?? 0;
+  if (!R) {
+    // cerchio tangente in C che passa per i punti della sezione: R = (x² + z²) / (−2z)
+    const maxX = typeof s.rect === "function" ? 0.25 : Math.max(-s.rect.x0, s.rect.x0 + s.rect.w);
+    const est: number[] = [];
+    for (let i = 0; i < count; i++) {
+      v.set(P[i * 3] - C.x, P[i * 3 + 1] - C.y, P[i * 3 + 2] - C.z);
+      if (Math.abs(v.dot(B)) > 0.004) continue;
+      const x = v.dot(T);
+      const z = v.dot(N);
+      if (z > -0.003 || Math.abs(x) > maxX || z < -maxX * 1.6) continue;
+      est.push((x * x + z * z) / (-2 * z));
+    }
+    est.sort((a, b) => a - b);
+    R = est.length ? est[Math.floor(est.length / 2)] : 0.15;
+    R = Math.min(0.6, Math.max(0.03, R));
+  }
+  return { C, N, T, R };
+}
+
+export interface StatueTattooChart {
+  canvas: HTMLCanvasElement;
+  C: THREE.Vector3;
+  N: THREE.Vector3;
+  T: THREE.Vector3;
+  R: number;
+  rect: Rect;
+  tol: number;
+  facing: number;
+}
+
+export function makeStatueTattoo(id: string, fontFamily: string, scale: number, geo: THREE.BufferGeometry): StatueTattooChart[] {
   const s = STATUE_TATTOOS[id];
-  const pen = makePen(s.rect, Math.round(s.px * scale));
-  const o = s.draw(pen.c, mulberry32(s.seed), fontFamily, pen);
-  return { canvas: pen.canvas, rect: s.rect, yaw: s.yaw, origin: uvOf(s.rect, o[0], o[1]) };
+  const rng = mulberry32(s.seed);
+  return s.charts.map((spec) => {
+    const a = anchorChart(geo, spec, s.yaw);
+    const rect = typeof spec.rect === "function" ? spec.rect(a.R) : spec.rect;
+    const pen = makePen(rect, Math.round(spec.px * scale));
+    spec.draw(pen.c, rng, fontFamily, pen, { R: a.R, rect });
+    return { canvas: pen.canvas, ...a, rect, tol: spec.tol ?? 0.6, facing: spec.facing ?? 0 };
+  });
 }

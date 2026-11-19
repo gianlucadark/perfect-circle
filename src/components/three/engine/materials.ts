@@ -28,18 +28,39 @@ export interface InkStoneOptions {
   topY?: number; // sommità in spazio oggetto per la colata
   yRange?: [number, number]; // proiezione cilindrica: fascia in altezza
   envIntensity?: number;
-  /** proiezione planare: rettangolo in spazio oggetto (x0, y0, w, h) lungo la direzione `projYaw` */
-  rect?: { x0: number; y0: number; w: number; h: number };
-  projYaw?: number;
-  origin?: [number, number]; // origine della propagazione (uv)
+  /** tatuaggi "a stencil" che avvolgono il corpo (busti, statue): fino a tre carte, vedi InkChart */
+  charts?: InkChart[];
+  origin?: [number, number]; // origine della propagazione (uv, solo torsi)
   dressY?: number; // veste d'inchiostro liquido sotto questa quota (spazio oggetto)
   glow?: THREE.ColorRepresentation; // colore dell'"ago" che traccia l'inchiostro
   span?: number; // misura di riferimento (spazio oggetto) per la propagazione da un punto della superficie
 }
 
 /**
+ * Carta locale della pelle, come uno stencil appoggiato sul corpo: centro C sulla superficie,
+ * normale N, tangente T (destra di chi guarda), B = N × T (alto). Il corpo attorno a C è
+ * approssimato da un cilindro di raggio R con asse lungo B: la coordinata orizzontale è la lunghezza
+ * d'arco attorno a quel cilindro, quella verticale la quota lungo B. Così il disegno si srotola sulla
+ * pelle e avvolge collo, petto e spalle invece di stirarsi ai lati come in una proiezione piana.
+ */
+export interface InkChart {
+  tex: THREE.Texture;
+  C: THREE.Vector3;
+  N: THREE.Vector3;
+  T: THREE.Vector3;
+  R: number;
+  /** rettangolo del disegno in coordinate della carta (metri): u0, v0, larghezza, altezza */
+  rect: { x0: number; y0: number; w: number; h: number };
+  /** scarto ammesso dal cilindro, in frazioni di R (oltre: altre parti del corpo, niente inchiostro) */
+  tol: number;
+  /** soglia di orientamento della superficie rispetto al cilindro (-1 = avvolge tutto) */
+  facing: number;
+}
+
+/**
  * Marmo procedurale (scansioni senza texture) con tatuaggio, su MeshStandardMaterial.
- * - uTattoo: maschera R8 (bianco = inchiostro), proiezione cilindrica (torsi) o planare (busti, statue).
+ * - uTattoo: maschera R8 (bianco = inchiostro) in proiezione cilindrica (torsi);
+ *   per busti e statue fino a tre carte locali (uTat0..2) che avvolgono il corpo (InkChart).
  * - uReveal: l'inchiostro si propaga dall'origine con bordo organico; il fronte brilla come un ago caldo.
  *   Con uInkPt.w = 1 l'origine è un punto della superficie (spazio oggetto): quello toccato dal cursore.
  * - uNeedle: punta luminosa che segue il cursore sul marmo (xyz spazio oggetto, w intensità).
@@ -51,9 +72,19 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
   const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, envMapIntensity: o.envIntensity ?? 0.6 });
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   blank.needsUpdate = true;
-  const r = o.rect;
+  const charts = (o.charts ?? []).slice(0, 3);
+  const vec3s = (f: (c: InkChart) => THREE.Vector3) => [0, 1, 2].map((i) => (charts[i] ? f(charts[i]).clone() : new THREE.Vector3(0, 0, 1)));
   const uniforms = {
     uTattoo: { value: o.tattoo ?? blank },
+    uTat0: { value: charts[0]?.tex ?? blank },
+    uTat1: { value: charts[1]?.tex ?? blank },
+    uTat2: { value: charts[2]?.tex ?? blank },
+    uCharts: { value: charts.length },
+    uCC: { value: vec3s((c) => c.C) },
+    uCN: { value: vec3s((c) => c.N) },
+    uCT: { value: vec3s((c) => c.T) },
+    uCRect: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].rect.x0, charts[i].rect.y0, charts[i].rect.w, charts[i].rect.h) : new THREE.Vector4(0, 0, 1, 1))) },
+    uCPar: { value: [0, 1, 2].map((i) => (charts[i] ? new THREE.Vector4(charts[i].R, charts[i].tol, charts[i].facing, 0) : new THREE.Vector4(1, 1, 0, 0))) },
     uReveal: { value: 0 },
     uInkColor: { value: new THREE.Color(o.inkColor ?? 0x020305) },
     uInkMetal: { value: o.inkMetal ?? 0 },
@@ -62,12 +93,9 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
     uPour: { value: o.pour ?? 0 },
     uTopY: { value: o.topY ?? 1 },
     uYRange: { value: new THREE.Vector2(...(o.yRange ?? [0, 1])) },
-    uHasTattoo: { value: o.tattoo ? 1 : 0 },
-    uProj: { value: r ? 1 : 0 },
-    uRect: { value: new THREE.Vector4(r?.x0 ?? 0, r?.y0 ?? 0, r?.w ?? 1, r?.h ?? 1) },
-    uProjYaw: { value: o.projYaw ?? 0 },
+    uHasTattoo: { value: o.tattoo || charts.length ? 1 : 0 },
+    uProj: { value: charts.length ? 1 : 0 },
     uOrigin: { value: new THREE.Vector2(...(o.origin ?? [0.5, 0.2])) },
-    uAspect: { value: new THREE.Vector2(r ? r.w / Math.max(r.w, r.h) : 1.6, r ? r.h / Math.max(r.w, r.h) : 1) },
     uDressY: { value: o.dressY ?? -1 },
     uGlowCol: { value: new THREE.Color(o.glow ?? 0xff8a3d) },
     uInkPt: { value: new THREE.Vector4(0, 0, 0, 0) },
@@ -88,11 +116,38 @@ export function makeInkStoneMaterial(o: InkStoneOptions) {
         /* glsl */ `#include <common>
 varying vec3 vObj;
 varying vec3 vObjN;
-uniform sampler2D uTattoo;
-uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uProj, uProjYaw, uDressY, uSpan;
+uniform sampler2D uTattoo, uTat0, uTat1, uTat2;
+uniform float uReveal, uInkMetal, uInkRough, uDark, uPour, uTopY, uHasTattoo, uTime, uProj, uDressY, uSpan;
+uniform int uCharts;
+uniform vec3 uCC[3], uCN[3], uCT[3];
+uniform vec4 uCRect[3], uCPar[3];
 uniform vec3 uInkColor, uGlowCol;
-uniform vec2 uYRange, uOrigin, uAspect;
-uniform vec4 uRect, uInkPt, uNeedle;
+uniform vec2 uYRange, uOrigin;
+uniform vec4 uInkPt, uNeedle;
+// carta locale srotolata su un cilindro di raggio R attorno al centro (vedi InkChart)
+void pcChart(sampler2D tex, int i, vec3 p, vec3 n, inout float ink, inout float bleed) {
+  vec3 T = uCT[i], N = uCN[i];
+  vec3 B = cross(N, T);
+  vec3 q = p - uCC[i];
+  float x = dot(q, T), y = dot(q, B), z = dot(q, N);
+  float R = uCPar[i].x;
+  float ax = R + z;
+  float rr = length(vec2(x, ax));
+  vec2 tuv = (vec2(R * atan(x, ax), y) - uCRect[i].xy) / uCRect[i].zw;
+  vec2 gx = dFdx(tuv), gy = dFdy(tuv);
+  // cucitura sul retro (l'angolo salta di un giro)
+  float lap = 6.2831853 * R / uCRect[i].z;
+  if (abs(gx.x) > lap * 0.5) gx.x -= sign(gx.x) * lap;
+  if (abs(gy.x) > lap * 0.5) gy.x -= sign(gy.x) * lap;
+  vec3 radial = (x * T + ax * N) / max(rr, 1e-5);
+  float w = smoothstep(uCPar[i].z, uCPar[i].z + 0.3, dot(n, radial));
+  w *= 1.0 - smoothstep(uCPar[i].y * 0.6, uCPar[i].y, abs(rr - R) / R);
+  vec2 inside = step(vec2(0.0), tuv) * step(tuv, vec2(1.0));
+  w *= inside.x * inside.y;
+  if (w <= 0.0) return;
+  ink = max(ink, textureGrad(tex, tuv, gx, gy).r * w);
+  bleed = max(bleed, textureGrad(tex, tuv, gx * 9.0, gy * 9.0).r * w);
+}
 float pcInk;
 float pcLiquid;
 float pcGlow;
@@ -115,29 +170,27 @@ vec3 pcPerturb(vec3 pos, vec3 n, vec2 dH, float fd) {
         "#include <map_fragment>",
         /* glsl */ `#include <map_fragment>
 {
-  vec2 tuv;
   float wproj = 1.0;
-  vec2 gx, gy;
   float dist;
+  float ink = 0.0;
+  float bleed = 0.0;
   if (uProj < 0.5) {
-    tuv = vec2(atan(vObj.x, vObj.z) / 6.2831853 + 0.5, (vObj.y - uYRange.x) / (uYRange.y - uYRange.x));
-    gx = dFdx(tuv); gy = dFdy(tuv);
+    vec2 tuv = vec2(atan(vObj.x, vObj.z) / 6.2831853 + 0.5, (vObj.y - uYRange.x) / (uYRange.y - uYRange.x));
+    vec2 gx = dFdx(tuv), gy = dFdy(tuv);
     if (abs(gx.x) > 0.5) gx.x -= sign(gx.x);
     if (abs(gy.x) > 0.5) gy.x -= sign(gy.x);
     dist = length(vec2((tuv.x - 0.5) * 1.6, tuv.y - uOrigin.y));
+    ink = textureGrad(uTattoo, tuv, gx, gy).r;
+    bleed = textureGrad(uTattoo, tuv, gx * 9.0, gy * 9.0).r;
   } else {
-    float cs = cos(uProjYaw), sn = sin(uProjYaw);
-    tuv = vec2((vObj.x * cs - vObj.z * sn - uRect.x) / uRect.z, (vObj.y - uRect.y) / uRect.w);
-    float facing = dot(normalize(vObjN), vec3(sn, 0.0, cs));
-    vec2 inside = step(vec2(0.0), tuv) * step(tuv, vec2(1.0));
-    wproj = smoothstep(0.02, 0.3, facing) * inside.x * inside.y;
-    gx = dFdx(tuv); gy = dFdy(tuv);
-    dist = length((tuv - uOrigin) * uAspect) * 1.25;
+    vec3 nObj = normalize(vObjN);
+    if (uCharts > 0) pcChart(uTat0, 0, vObj, nObj, ink, bleed);
+    if (uCharts > 1) pcChart(uTat1, 1, vObj, nObj, ink, bleed);
+    if (uCharts > 2) pcChart(uTat2, 2, vObj, nObj, ink, bleed);
+    dist = length(vObj - uCC[0]) / uSpan;
   }
   // propagazione dal punto toccato: distanza misurata sulla superficie stessa (spazio oggetto)
   if (uInkPt.w > 0.5) dist = length(vObj - uInkPt.xyz) / uSpan;
-  float ink = textureGrad(uTattoo, tuv, gx, gy).r;
-  float bleed = textureGrad(uTattoo, tuv, gx * 9.0, gy * 9.0).r;
   float n = pcNoise(vObj.xy * 38.0 + vObj.z * 21.0) * 0.5 + pcNoise(vObj.zy * 95.0) * 0.25;
   float rv = uReveal * 1.6 - (dist * 0.9 + n * 0.32);
   float mask = smoothstep(0.0, 0.05, rv) * uHasTattoo * wproj;
@@ -220,7 +273,7 @@ metalnessFactor = mix(metalnessFactor, uInkMetal, pcInk);`,
 totalEmissiveRadiance += uGlowCol * pcGlow * 11.0;`,
       );
   };
-  m.customProgramCacheKey = () => "inkstone3";
+  m.customProgramCacheKey = () => "inkstone4";
   return m;
 }
 

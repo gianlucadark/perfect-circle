@@ -65,11 +65,10 @@ interface Exhibit {
   needlePt: THREE.Vector3;
 }
 
-/** velocità del disegno: sotto il cursore, poi da solo; attesa prima del disegno automatico */
-const INK_RATE_TOUCHED = 0.55;
-const INK_RATE_IDLE = 0.16;
-const AUTO_DELAY_POINTER = 3.0;
-const AUTO_DELAY_TOUCH = 1.4;
+/** velocità del disegno: sotto il cursore, poi da solo; attesa dopo che l'opera è inquadrata */
+const INK_RATE_TOUCHED = 0.7;
+const INK_RATE_IDLE = 0.42;
+const AUTO_DELAY = 0.65;
 
 export interface TorsoMeta {
   id: string;
@@ -246,15 +245,11 @@ export class Gallery {
     const mobile = Math.min(window.innerWidth, window.innerHeight) < 700;
     const texScale = mobile ? 0.75 : 1;
     const statueMat = (id: string, extra: InkStoneOptions = {}) => {
-      const t = makeStatueTattoo(id, fontFamily, texScale);
-      return makeInkStoneMaterial({
-        tattoo: maskTexture(t.canvas, this.renderer),
-        rect: t.rect,
-        projYaw: t.yaw,
-        origin: t.origin,
-        envIntensity: 0.55,
-        ...extra,
-      });
+      const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id)).map((t) => ({ ...t, tex: maskTexture(t.canvas, this.renderer, true) }));
+      const m = makeInkStoneMaterial({ charts, envIntensity: 0.55, ...extra });
+      // il disegno automatico parte dal punto d'appoggio della prima carta (sterno, gola)
+      m.userData.inkOrigin = charts[0]?.C;
+      return m;
     };
 
     for (const b of BUSTS) {
@@ -985,13 +980,19 @@ void main(){
         e.mats.forEach((m) => (m.userData.uniforms as Record<string, { value: THREE.Vector4 }>).uInkPt.value.set(this.hit.x, this.hit.y, this.hit.z, 1));
       }
       const focus = this.interactive && Math.abs(sf - e.revealStation) < 0.45;
-      if (focus && !e.started) {
+      // inquadrata: la camera è ferma sulla sua stazione e l'opera è dentro lo schermo
+      if (focus && !e.started && Math.abs(sf - e.revealStation) < 0.3 && this.onScreen(e.mesh)) {
         e.dwell += dt;
-        if (e.dwell > (this.coarse ? AUTO_DELAY_TOUCH : AUTO_DELAY_POINTER)) {
+        if (e.dwell > AUTO_DELAY) {
           e.started = true;
-          e.mats.forEach((m) => (m.userData.uniforms as Record<string, { value: THREE.Vector4 }>).uInkPt.value.setW(0));
+          e.mats.forEach((m) => {
+            const o = m.userData.inkOrigin as THREE.Vector3 | undefined;
+            const pt = (m.userData.uniforms as Record<string, { value: THREE.Vector4 }>).uInkPt.value;
+            if (o) pt.set(o.x, o.y, o.z, 1);
+            else pt.setW(0);
+          });
         }
-      }
+      } else if (!e.started) e.dwell = 0;
       if (e.started) e.ink = Math.min(1, e.ink + dt * (touched ? INK_RATE_TOUCHED : INK_RATE_IDLE));
       // la punta dell'ago: piena mentre disegna, tenue sul tatuaggio finito
       const want = touched ? (e.ink < 1 ? 1 : 0.3) : 0;
@@ -1007,6 +1008,14 @@ void main(){
       else if (focus && !e.started && ui === 0) ui = 1;
     }
     this.inkUi = ui;
+  }
+
+  /** il centro dell'opera cade nella parte visibile dello schermo, davanti alla camera */
+  private onScreen(mesh: THREE.Mesh) {
+    const s = mesh.geometry.boundingSphere;
+    if (!s) return true;
+    const p = this.tmpV.copy(s.center).applyMatrix4(mesh.matrixWorld).project(this.camera);
+    return p.z < 1 && Math.abs(p.x) < 0.85 && Math.abs(p.y) < 0.9;
   }
 
   // camere chiave dell'outro: Custode → volto → sguardo verso l'oculo

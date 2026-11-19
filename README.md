@@ -43,7 +43,7 @@ In sviluppo, `window.__pc.seek(0..1)` porta il percorso a un punto preciso.
    - **Il gigante**: la testa del David di Michelangelo, con un serpente che sale sul collo;
    - **coro** di dodici teste femminili con aureole;
    - **La Custode**: Venere di Milo tatuata dalla corona ai fianchi, vestita d'inchiostro liquido che risale.
-   Ogni opera arriva in marmo intatto. Il cursore che la sfiora (su touch: un tocco) fissa l'origine del tatuaggio in quel punto e l'inchiostro si propaga sulla superficie della scultura. Se nessuno la tocca, dopo una breve sosta (3 s con il mouse, 1,4 s su touch) il tatuaggio si disegna da solo. Ogni opera ha la sua luce: temperatura, taglio e fascio diversi.
+   Ogni opera arriva in marmo intatto. Il cursore che la sfiora (su touch: un tocco) fissa l'origine del tatuaggio in quel punto e l'inchiostro si propaga sulla superficie della scultura. Se nessuno la tocca, il tatuaggio comincia a disegnarsi da solo un attimo dopo che l'opera è inquadrata (~0,65 s). I tatuaggi seguono la forma del corpo: sono stencil srotolati sulla superficie, non proiezioni piatte. Ogni opera ha la sua luce: temperatura, taglio e fascio diversi.
 5. **Ascesa e ritorno.**
    - La camera sale lungo la Custode, si ferma sul volto e guarda in alto, nel pozzo della rotonda.
    - Dopo «Il cerchio si chiude», dentro l'oculo compare l'invito finale: «Ogni corpo è un'opera. La prossima potrebbe essere la tua.» con il pulsante *Prenota una consulenza* (link in `CTA_CAPTION.href`, `src/components/three/engine/stations.ts`).
