@@ -14,7 +14,8 @@ import {
   shared,
   type InkStoneOptions,
 } from "./materials";
-import { makeFlashCanvas, makeTorsoTattooCanvas, type TorsoVariant } from "./tattoo";
+import { makeFlashCanvas } from "./tattoo";
+import { computeTorsoFrame, makeTorsoTattooCanvas, TORSO_FIT, type TorsoVariant } from "./torsoTattoos";
 import { makeStatueTattoo } from "./statueTattoos";
 import { ROTUNDA, STATIONS } from "./stations";
 
@@ -244,6 +245,8 @@ export class Gallery {
 
     const mobile = Math.min(window.innerWidth, window.innerHeight) < 700;
     const texScale = mobile ? 0.75 : 1;
+    // griglia di lettura dei torsi al posto dei disegni (solo sviluppo): ?inkgrid
+    const inkGrid = process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).has("inkgrid");
     const statueMat = (id: string, extra: InkStoneOptions = {}) => {
       const charts = makeStatueTattoo(id, fontFamily, texScale, geo(id)).map((t) => ({ ...t, tex: maskTexture(t.canvas, this.renderer, true) }));
       const m = makeInkStoneMaterial({ charts, envIntensity: 0.55, ...extra });
@@ -259,9 +262,12 @@ export class Gallery {
     torsoMeta.forEach((meta, i) => {
       const layout = TORSO_LAYOUT.find((l) => l.id === meta.id);
       if (!layout) return;
-      const c = makeTorsoTattooCanvas(layout.variant, fontFamily, meta.height, meta.circumference);
+      const frame = computeTorsoFrame(torsoGeos[i], meta.height, TORSO_FIT[layout.variant]);
+      const c = makeTorsoTattooCanvas(layout.variant, frame, texScale, inkGrid);
       const mat = makeInkStoneMaterial({
         tattoo: maskTexture(c, this.renderer, true),
+        axis: frame.axis,
+        axisH: meta.height,
         dark: layout.dark ? 1 : 0,
         inkColor: layout.ink ?? 0x020305,
         inkMetal: layout.metal ?? 0,

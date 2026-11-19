@@ -94,8 +94,8 @@ export const STATIONS: Station[] = [
     lift: 0.08,
     index: "V.1",
     title: "Belvedere",
-    body: "La spina dorsale come un rosario di cerchi. Il torso più studiato della storia, riletto in inchiostro.",
-    meta: "Linework · dotwork",
+    body: "Un sole sullo sterno, fasce che seguono pettorali e costole fino a un rosario di cerchi lungo la spina. Il torso più studiato della storia, riletto in inchiostro.",
+    meta: "Blackwork · dotwork",
     align: "right",
   },
   {
@@ -105,8 +105,8 @@ export const STATIONS: Station[] = [
     lift: 0.08,
     index: "V.2",
     title: "Psiche",
-    body: "Rami sottili che avvolgono i fianchi, pizzo sotto lo sterno. Il fine line nella sua forma più intima.",
-    meta: "Fine line · botanico",
+    body: "Peonie che scendono dalla spalla lungo il fianco, pizzo sotto il seno. Il black & grey nella sua forma più morbida.",
+    meta: "Black & grey · botanico",
     align: "left",
   },
   {

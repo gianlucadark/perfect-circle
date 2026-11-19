@@ -63,7 +63,8 @@ Ogni tatuaggio si disegna mentre la camera arriva: un fronte d'inchiostro avanza
   - `stations.ts`: soste, testi, inquadrature per schermi verticali, lunghezze del percorso.
   - `gallery.ts`: architettura, opere, luci a pool, rotonda con oculo e pioggia, camera dell'ascesa.
   - `statueTattoos.ts`: tatuaggi delle statue, disegnati in metri su viste ortografiche.
-  - `tattoo.ts`: primitive di disegno, tatuaggi dei torsi, tavole flash.
+  - `torsoTattoos.ts`: tatuaggi dei torsi, su un cilindro il cui asse segue il tronco.
+  - `tattoo.ts`: primitive di disegno, tavole flash.
   - `materials.ts`: marmo tatuato, anello liquido, membrana, pavimento a specchio, fasci, tavole flash.
   - `portalShader.ts`: portale in raymarching.
   - `post.ts`: composito e pass finale.

@@ -34,16 +34,16 @@ type Pt = [number, number];
 const TAU = Math.PI * 2;
 
 // ------------------------------------------------------------------ primitive metriche
-const ink = (c: Ctx) => {
+export const ink = (c: Ctx) => {
   c.fillStyle = "#fff";
   c.strokeStyle = "#fff";
 };
-const erase = (c: Ctx) => {
+export const erase = (c: Ctx) => {
   c.fillStyle = "#000";
   c.strokeStyle = "#000";
 };
 
-function line(c: Ctx, x1: number, y1: number, x2: number, y2: number, w: number) {
+export function line(c: Ctx, x1: number, y1: number, x2: number, y2: number, w: number) {
   c.lineWidth = w;
   c.beginPath();
   c.moveTo(x1, y1);
@@ -51,14 +51,14 @@ function line(c: Ctx, x1: number, y1: number, x2: number, y2: number, w: number)
   c.stroke();
 }
 
-function poly(c: Ctx, pts: Pt[]) {
+export function poly(c: Ctx, pts: Pt[]) {
   c.beginPath();
   pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
   c.closePath();
   c.fill();
 }
 
-function diamond(c: Ctx, x: number, y: number, w: number, h: number) {
+export function diamond(c: Ctx, x: number, y: number, w: number, h: number) {
   poly(c, [
     [x - w / 2, y],
     [x, y + h / 2],
@@ -68,7 +68,7 @@ function diamond(c: Ctx, x: number, y: number, w: number, h: number) {
 }
 
 /** goccia piena: punta in (x, y), bulbo lungo la direzione `ang` */
-function teardrop(c: Ctx, x: number, y: number, len: number, r: number, ang = -Math.PI / 2) {
+export function teardrop(c: Ctx, x: number, y: number, len: number, r: number, ang = -Math.PI / 2) {
   const d = Math.max(len - r, r * 1.05);
   const cx = x + Math.cos(ang) * d;
   const cy = y + Math.sin(ang) * d;
@@ -82,7 +82,7 @@ function teardrop(c: Ctx, x: number, y: number, len: number, r: number, ang = -M
   c.fill();
 }
 
-function crescent(c: Ctx, x: number, y: number, r: number, ang: number) {
+export function crescent(c: Ctx, x: number, y: number, r: number, ang: number) {
   dot(c, x, y, r);
   erase(c);
   dot(c, x + Math.cos(ang) * r * 0.45, y + Math.sin(ang) * r * 0.45, r * 0.86);
@@ -98,7 +98,7 @@ interface SwagOpts {
 }
 
 /** ghirlanda di perle con gocce pendenti, da (x1,y1) a (x2,y2), flessa di `sag` verso il basso */
-function swag(c: Ctx, x1: number, y1: number, x2: number, y2: number, sag: number, o: SwagOpts) {
+export function swag(c: Ctx, x1: number, y1: number, x2: number, y2: number, sag: number, o: SwagOpts) {
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2 - sag * 2;
   c.lineWidth = o.lw;
@@ -130,19 +130,19 @@ function swag(c: Ctx, x1: number, y1: number, x2: number, y2: number, sag: numbe
 }
 
 /** catenella verticale verso il basso con goccia finale */
-function chain(c: Ctx, x: number, y: number, len: number, step: number, bead: number, dropLen: number, dropR: number) {
+export function chain(c: Ctx, x: number, y: number, len: number, step: number, bead: number, dropLen: number, dropR: number) {
   for (let d = 0; d <= len; d += step) dot(c, x, y - d, bead * (1 - (d / len) * 0.25));
   teardrop(c, x, y - len - step * 0.6, dropLen, dropR);
 }
 
-function beadsArc(c: Ctx, cx: number, cy: number, r: number, n: number, size: number, a0 = Math.PI, a1 = TAU) {
+export function beadsArc(c: Ctx, cx: number, cy: number, r: number, n: number, size: number, a0 = Math.PI, a1 = TAU) {
   for (let i = 0; i <= n; i++) {
     const a = a0 + ((a1 - a0) * i) / n;
     dot(c, cx + Math.cos(a) * r, cy + Math.sin(a) * r, size);
   }
 }
 
-function arcStroke(c: Ctx, cx: number, cy: number, r: number, w: number, a0 = Math.PI, a1 = TAU) {
+export function arcStroke(c: Ctx, cx: number, cy: number, r: number, w: number, a0 = Math.PI, a1 = TAU) {
   c.lineWidth = w;
   c.beginPath();
   c.arc(cx, cy, r, a0, a1);
@@ -158,7 +158,7 @@ function clip(c: Ctx, x: number, y: number, w: number, h: number, draw: () => vo
   c.restore();
 }
 
-function lace(c: Ctx, x0: number, x1: number, y: number, r: number, lw: number) {
+export function lace(c: Ctx, x0: number, x1: number, y: number, r: number, lw: number) {
   const top = y + r * 1.4;
   line(c, x0, top, x1, top, lw);
   line(c, x0, top + r * 0.55, x1, top + r * 0.55, lw * 0.7);
@@ -297,7 +297,7 @@ function makePen(rect: Rect, maxPx: number) {
 const lap = (v0: number, h: number) => (R: number): Rect => ({ x0: -Math.PI * R, y0: v0, w: TAU * R, h });
 
 /** fase lunare: k = 0 nuova (solo contorno), 0.5 mezza, 1 piena; `side` = lato illuminato */
-function moon(c: Ctx, x: number, y: number, r: number, k: number, side: 1 | -1, lw: number) {
+export function moon(c: Ctx, x: number, y: number, r: number, k: number, side: 1 | -1, lw: number) {
   circle(c, x, y, r, lw);
   if (k >= 0.99) return dot(c, x, y, r);
   if (k <= 0.01) return;
