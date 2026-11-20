@@ -32,7 +32,7 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
   });
-  await page.goto("http://127.0.0.1:3000", { waitUntil: "networkidle2", timeout: 120000 });
+  await page.goto(process.env.PC_URL ?? "http://127.0.0.1:3000", { waitUntil: "networkidle2", timeout: 120000 });
   await page.waitForFunction(() => window.__pc && [...document.querySelectorAll("button")]
     .some((button) => button.textContent.includes("silenzio") && !button.disabled), { timeout: 180000 });
   report.gpu = await page.evaluate(() => {

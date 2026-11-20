@@ -181,6 +181,8 @@ export class Gallery {
   private look = new THREE.Vector3();
   private w = 1;
   private h = 1;
+  /** pixel della render target per pixel di riferimento (DPR storico): vedi setPixelScale */
+  private pxScale = 1;
   private portrait = 0;
   /** apertura verticale di base e quota dell'oculo (dipendono dal formato dello schermo) */
   fov0 = 42;
@@ -776,7 +778,7 @@ export class Gallery {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      uniforms: { uTime: shared.uTime, uScale: { value: window.innerHeight } },
+      uniforms: { uTime: shared.uTime, uScale: { value: this.h * this.pxScale } },
       vertexShader: /* glsl */ `
 attribute float seed; uniform float uTime; uniform float uScale; varying float vA;
 void main(){
@@ -849,7 +851,14 @@ void main(){
     this.outroPath = undefined; // il percorso dell'outro dipende dal formato
     this.membrane?.position.setY(this.oculusY);
     if (this.floor) this.floor.getRenderTarget().setSize(Math.round(w * 0.5), Math.round(h * 0.5));
-    if (this.dust) (this.dust.material as THREE.ShaderMaterial).uniforms.uScale.value = h;
+    this.setPixelScale(this.pxScale);
+  }
+
+  /** Il pulviscolo è disegnato in pixel: con più pixel nella render target i punti crescono di
+   *  conseguenza e mantengono la stessa misura a schermo. */
+  setPixelScale(k: number) {
+    this.pxScale = k;
+    if (this.dust) (this.dust.material as THREE.ShaderMaterial).uniforms.uScale.value = this.h * k;
   }
 
   /** raggio a schermo (frazione di mezza altezza) dell'oculo durante l'ascesa */
